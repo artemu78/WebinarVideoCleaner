@@ -111,11 +111,37 @@ def process_srt_correction(srt_path, language="en"):
     6. Do not include any explanation, only the SRT content.
     """
     
+    system_instruction = """
+    You are a precision-oriented transcription editor.
+    Your EXCLUSIVE task is to fix spelling and grammar in the text portion of SRT files.
+    
+    CRITICAL CONSTRAINT: 
+    - NEVER alter a single digit, colon, comma, or arrow in the timestamp lines.
+    - NEVER change the sequence numbers.
+    - The output must have the EXACT same number of lines as the input.
+    - Even if the timestamp seems wrong to you, DO NOT FIX IT.
+    
+    EXAMPLE:
+    Input:
+    1
+    00:00:01,000 --> 00:00:04,000
+    Helllo world, this is a test.
+    
+    Output:
+    1
+    00:00:01,000 --> 00:00:04,000
+    Hello world, this is a test.
+    """
+
     # Step 5: Call Gemini
     print("Requesting transcription correction from Gemini (model: gemini-3-flash-preview)...")
     try:
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.1, # Lower temperature reduces "creative" hallucinations
+            ),
             contents=[
                 types.Part.from_uri(
                     file_uri=uploaded_file.uri,
@@ -143,7 +169,7 @@ def process_srt_correction(srt_path, language="en"):
     
     # Create new filename
     base, ext = os.path.splitext(srt_path)
-    output_path = f"{base}_corrected_transcription{ext}"
+    output_path = f"{base}_corrected_by_gemini{ext}"
     
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(cleaned_srt_content)
