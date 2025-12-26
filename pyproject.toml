@@ -12,10 +12,10 @@ authors = [
     { name = "Artem Reva" }
 ]
 dependencies = [
-    "google-genai",
-    "moviepy>=2.0.0.dev0",
-    "openai-whisper>=20240303",
-    "python-dotenv",
+    "google-genai", # audio_cleaner.py, generate_chapters.py
+    "moviepy>=2.0.0.dev0", # cut_mp4.py
+    "openai-whisper>=20240303", # transcribe_to_srt.py
+    "python-dotenv", # audio_cleaner.py, generate_chapters.py
 ]
 
 [tool.setuptools]

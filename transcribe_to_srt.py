@@ -392,8 +392,12 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
         if not out_name: out_name = "output"
     elif files_to_process:
         # Single file mode
-        filename = os.path.basename(files_to_process[0])
-        out_name = os.path.splitext(filename)[0]
+        # Single file mode
+        input_path = os.path.abspath(files_to_process[0])
+        input_dir = os.path.dirname(input_path)
+        filename = os.path.basename(input_path)
+        base_name = os.path.splitext(filename)[0]
+        out_name = os.path.join(input_dir, base_name)
     else:
         return None
 
