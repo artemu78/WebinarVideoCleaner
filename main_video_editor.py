@@ -11,6 +11,7 @@ import json
 import re
 import sys
 import time
+from datetime import datetime
 
 # Import the three modules
 try:
@@ -204,9 +205,11 @@ def main():
     8. Generate Chapters
     """
     start_time = time.time()
+    script_start_dt = datetime.now()
     
     print("=" * 60)
     print("MP4 Video Editor - Automated Workflow")
+    print(f"Started at: {script_start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     print()
     
@@ -254,6 +257,7 @@ def main():
     corrected_srt_path = "Skipped"
     
     # Step 2: Transcribe MP4 to SRT
+    step_start_time = time.time()
     print("=" * 60)
     print("STEP 1: Transcribing MP4 to SRT")
     print("=" * 60)
@@ -278,6 +282,7 @@ def main():
             return
         
         print(f"\n✓ Transcription complete: {srt_path}\n")
+        print(f"Step 1 duration: {time.time() - step_start_time:.2f} seconds")
     except Exception as e:
         print(f"Error during transcription: {e}")
         import traceback
@@ -285,6 +290,7 @@ def main():
         return
     
     # Step 2: Correct Transcription Errors
+    step_start_time = time.time()
     print("=" * 60)
     print(f"STEP 2: Correcting Transcription Errors (Language: {detected_language})")
     print("=" * 60)
@@ -309,9 +315,12 @@ def main():
         traceback.print_exc()
         print("Continuing with original SRT...")
     
+    print(f"Step 2 duration: {time.time() - step_start_time:.2f} seconds")
+    
     # Step 3, 4, 5, 6: Cut video workflow (Skipped if No Cut mode)
     if not no_cut_mode:
         # Step 3: Analyze SRT with Gemini
+        step_start_time = time.time()
         print("=" * 60)
         print("STEP 3: Analyzing SRT with Gemini")
         print("=" * 60)
@@ -330,6 +339,7 @@ def main():
                 return
             
             print(f"\n✓ Gemini analysis complete: {gemini_response_path}\n")
+            print(f"Step 3 duration: {time.time() - step_start_time:.2f} seconds")
         except Exception as e:
             print(f"Error during Gemini analysis: {e}")
             import traceback
@@ -337,6 +347,7 @@ def main():
             return
         
         # Step 4: Convert Gemini response to cut format
+        step_start_time = time.time()
         print("=" * 60)
         print("STEP 4: Converting Gemini response to cut format")
         print("=" * 60)
@@ -355,6 +366,7 @@ def main():
                 return
             
             print(f"\n✓ Conversion complete: {json_ranges_path}\n")
+            print(f"Step 4 duration: {time.time() - step_start_time:.2f} seconds")
         except Exception as e:
             print(f"Error during conversion: {e}")
             import traceback
@@ -362,6 +374,7 @@ def main():
             return
         
         # Step 5: Cut video
+        step_start_time = time.time()
         print("=" * 60)
         print("STEP 5: Cutting video")
         print("=" * 60)
@@ -380,6 +393,7 @@ def main():
                 return
             
             print(f"\n✓ Video cutting complete: {output_video_path}\n")
+            print(f"Step 5 duration: {time.time() - step_start_time:.2f} seconds")
         except Exception as e:
             print(f"Error during video cutting: {e}")
             import traceback
@@ -387,6 +401,7 @@ def main():
             return
         
         # Step 6: Correct SRT timestamps
+        step_start_time = time.time()
         print("=" * 60)
         print("STEP 6: Correcting SRT timestamps")
         print("=" * 60)
@@ -410,10 +425,12 @@ def main():
             import traceback
             traceback.print_exc()
             corrected_srt_path = f"Error: {e}"
+        print(f"Step 6 duration: {time.time() - step_start_time:.2f} seconds")
     else:
         print("\nSkipping Steps 3, 4, 5, 6 (Analysis & Cutting) due to No Cut mode selection.")
     
     # Step 7: Generate Chapters
+    step_start_time = time.time()
     print("=" * 60)
     print("STEP 7: Generating Chapters")
     print("=" * 60)
@@ -447,6 +464,8 @@ def main():
     else:
         print("Error: No valid SRT file available for chapter generation.")
         chapters_path = "No input SRT"
+    
+    print(f"Step 7 duration: {time.time() - step_start_time:.2f} seconds")
 
     # Summary
     elapsed_time = time.time() - start_time
@@ -455,9 +474,13 @@ def main():
     seconds = int(elapsed_time % 60)
     time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     
+    script_end_dt = datetime.now()
+    
     print("=" * 60)
     print("WORKFLOW COMPLETE!")
     print("=" * 60)
+    print(f"Script started:  {script_start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Script finished: {script_end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Original video: {mp4_path}")
     print(f"SRT file:       {srt_path}")
     print(f"Gemini response: {gemini_response_path}")
