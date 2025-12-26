@@ -1,6 +1,6 @@
 # transcribe_to_srt.py
 # Requirements:
-#   pip install -U openai-whisper==20240303  (or latest whisper)
+#   pip install -U "openai-whisper>=20240930"  (or latest whisper)
 #   ffmpeg must be installed and on PATH (for whisper)
 # Usage:
 #   python transcribe_to_srt.py --model small
@@ -175,11 +175,26 @@ def detect_language(model, audio_path):
         else:
             raise Exception(f"Could not detect language: {e}")
 
-def get_segments_from_file(model, audio_path, max_dur, language=None):
+def get_segments_from_file(model, audio_path, max_dur, language=None, initial_prompt=None):
     print(f"\nProcessing: {audio_path}")
+    print("Using anti-hallucination settings: condition_on_previous_text=False, no_speech_threshold=0.6")
+    if initial_prompt:
+        print(f"Using initial prompt: {initial_prompt}")
     transcribe_start = time.time()
     # Use specified language or let whisper detect if None
-    result = model.transcribe(audio_path, verbose=False, language=language)
+    # Anti-hallucination settings:
+    # condition_on_previous_text=False: Prevents looping phrases like "Subtitle Editor"
+    # no_speech_threshold=0.6: Filters out silence better (default is 0.6, but ensuring it's set)
+    # logprob_threshold=-1.0: Discards low confidence transcriptions
+    result = model.transcribe(
+        audio_path, 
+        verbose=False, 
+        language=language,
+        condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+        logprob_threshold=-1.0,
+        initial_prompt=initial_prompt
+    )
     transcribe_time = time.time() - transcribe_start
     mins, secs = divmod(transcribe_time, 60)
     print(f"Transcription completed in {int(mins):02d}:{secs:05.2f}")
@@ -189,17 +204,18 @@ def get_segments_from_file(model, audio_path, max_dur, language=None):
     detected_lang = result.get("language")
     return process_segments(raw_segments, max_dur), detected_lang
 
-def main(folder_input=None, file_input=None, model="small", max_segment_duration=8.0, use_srt=True, language=None):
+def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI."):
     """
     Transcribe audio files to SRT format using Whisper.
     
     Args:
         folder_input (str, optional): Path to folder containing audio files to process.
         file_input (str, optional): Path to a single audio file to process.
-        model (str, optional): Whisper model name (tiny, base, small, medium, large). Default: "small"
+        model (str, optional): Whisper model name (tiny, base, small, medium, large, turbo). Default: "turbo"
         max_segment_duration (float, optional): Maximum segment duration in seconds. Default: 8.0
         use_srt (bool, optional): Whether to output SRT format. If False, outputs plain text. Default: True
         language (str, optional): Language code (e.g., 'en', 'ru'). If None, will auto-detect. Default: None
+        initial_prompt (str, optional): Prompt to guide transcription.
     
     Returns:
         str: Path to the created SRT/text file, or None if no files were processed.
@@ -211,12 +227,15 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
     interactive_mode = (folder_input is None and file_input is None)
     if interactive_mode:
         parser = argparse.ArgumentParser(description="Transcribe audio to SRT using Whisper")
-        parser.add_argument("--model", default="small", help="Whisper model (tiny, base, small, medium, large)")
+        parser.add_argument("--model", default="turbo", help="Whisper model (tiny, base, small, medium, large, turbo)")
         parser.add_argument("--max_segment_duration", type=float, default=8.0,
                             help="Optional: re-chunk long segments to this maximum duration (seconds)")
+        parser.add_argument("--initial_prompt", type=str, default="Это запись технического вебинара или видео про программирование и AI.", 
+                            help="Optional: provide a prompt to guide the transcription and reduce hallucinations.")
         args = parser.parse_args()
         model = args.model
         max_segment_duration = args.max_segment_duration
+        initial_prompt = args.initial_prompt
         
         print(f"Current working directory: {os.getcwd()}")
         folder_input = input("Which folder to process? (Press Enter for single file): ").strip()
@@ -227,6 +246,7 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
         srt_input = input("convert to srt? (y/n): ").strip().lower()
         use_srt = (srt_input != 'n')
 
+    print(f"Whisper package version: {whisper.__version__}")
     print(f"Loading Whisper model '{model}' (this may take a while)...")
     start_time = time.time()
     whisper_model = whisper.load_model(model)
@@ -373,7 +393,7 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
             temp_files.append(extracted_mp3)
             audio_path = extracted_mp3
         
-        segs, detected_file_lang = get_segments_from_file(whisper_model, audio_path, max_segment_duration, language=language)
+        segs, detected_file_lang = get_segments_from_file(whisper_model, audio_path, max_segment_duration, language=language, initial_prompt=initial_prompt)
         all_segments.extend(segs)
         if language is None and detected_file_lang:
             language = detected_file_lang

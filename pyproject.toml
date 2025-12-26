@@ -14,7 +14,7 @@ authors = [
 dependencies = [
     "google-genai", # audio_cleaner.py, generate_chapters.py
     "moviepy>=2.0.0.dev0", # cut_mp4.py
-    "openai-whisper>=20240303", # transcribe_to_srt.py
+    "openai-whisper>=20250625", # transcribe_to_srt.py
     "python-dotenv", # audio_cleaner.py, generate_chapters.py
 ]
 
