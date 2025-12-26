@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webinar-video-cleaner"
+version = "0.1.0"
+description = "Automated video editing workflow using Whisper and Gemini"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Artem Reva" }
+]
+dependencies = [
+    "google-genai",
+    "moviepy>=2.0.0.dev0",
+    "openai-whisper>=20240303",
+    "python-dotenv",
+]
+
+[tool.setuptools]
+packages = ["."]
