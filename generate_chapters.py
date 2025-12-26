@@ -57,7 +57,7 @@ def get_api_key(filepath="gemini_key.txt"):
             
     return api_key
 
-def generate_chapters(srt_path):
+def generate_chapters(srt_path, language=None):
     """Upload SRT file to Gemini and get chapters/timecodes."""
     
     # Step 1: Initialize Client
@@ -109,8 +109,15 @@ def generate_chapters(srt_path):
     
     # Step 4: Define the Prompt
     print("Step 4: Preparing prompt for chapters...")
-    prompt = """
+    lang_instruction = ""
+    if language:
+        # Map common codes to full names if needed, or just use the code as is.
+        # Gemini understands codes.
+        lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
+
+    prompt = f"""
     Analyze the uploaded SRT subtitles for this webinar/video.
+    {lang_instruction}
     
     Your task is to create a list of timestamps (chapters) that summarize the entire content.
     

@@ -186,7 +186,8 @@ def get_segments_from_file(model, audio_path, max_dur, language=None):
 
     # Whisper returns 'segments': list with start/end/text
     raw_segments = result.get("segments", [])
-    return process_segments(raw_segments, max_dur)
+    detected_lang = result.get("language")
+    return process_segments(raw_segments, max_dur), detected_lang
 
 def main(folder_input=None, file_input=None, model="small", max_segment_duration=8.0, use_srt=True, language=None):
     """
@@ -372,8 +373,10 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
             temp_files.append(extracted_mp3)
             audio_path = extracted_mp3
         
-        segs = get_segments_from_file(whisper_model, audio_path, max_segment_duration, language=language)
+        segs, detected_file_lang = get_segments_from_file(whisper_model, audio_path, max_segment_duration, language=language)
         all_segments.extend(segs)
+        if language is None and detected_file_lang:
+            language = detected_file_lang
     
     # Clean up temporary MP3 files
     for temp_file in temp_files:
@@ -414,7 +417,7 @@ def main(folder_input=None, file_input=None, model="small", max_segment_duration
         f.write(content)
     print(f"Wrote output to {outpath}")
     
-    return outpath
+    return outpath, language
 
 if __name__ == "__main__":
     script_start = time.time()

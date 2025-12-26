@@ -19,9 +19,10 @@ try:
     import cut_mp4
     import correct_srt
     import generate_chapters
+    import correct_transcription
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
-    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, correct_srt.py, and generate_chapters.py are in the same directory.")
+    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, correct_srt.py, generate_chapters.py, and correct_transcription.py are in the same directory.")
     sys.exit(1)
 
 
@@ -195,9 +196,12 @@ def main():
     Main workflow:
     1. Ask user for MP4 file
     2. Transcribe to SRT
-    3. Analyze SRT with Gemini
-    4. Convert Gemini response to cut format
-    5. Cut video
+    3. Correct Transcription Errors
+    4. Analyze SRT with Gemini
+    5. Convert Gemini response to cut format
+    6. Cut video
+    7. Correct SRT timestamps
+    8. Generate Chapters
     """
     start_time = time.time()
     
@@ -230,13 +234,31 @@ def main():
             return
     
     print(f"\nProcessing MP4 file: {mp4_path}\n")
+
+    # Ask for mode
+    print("Select Mode:")
+    print("1. Full Video Cleaner (Transcribe + Cut + Chapters)")
+    print("2. Transcription & Chapters Only (No Cut)")
+    mode_input = input("Enter choice (1/2, default 1): ").strip()
+    no_cut_mode = (mode_input == '2')
+
+    if no_cut_mode:
+        print("\nMode: Transcription & Chapters Only (No Cut)")
+    else:
+        print("\nMode: Full Video Cleaner")
+
+    # Initialize variables that might be skipped
+    gemini_response_path = "Skipped"
+    json_ranges_path = "Skipped"
+    output_video_path = "Skipped"
+    corrected_srt_path = "Skipped"
     
     # Step 2: Transcribe MP4 to SRT
     print("=" * 60)
     print("STEP 1: Transcribing MP4 to SRT")
     print("=" * 60)
     try:
-        srt_path = transcribe_to_srt.main(
+        srt_path, detected_language = transcribe_to_srt.main(
             file_input=mp4_path,
             model="small",
             max_segment_duration=8.0,
@@ -262,109 +284,138 @@ def main():
         traceback.print_exc()
         return
     
-    # Step 3: Analyze SRT with Gemini
+    # Step 2: Correct Transcription Errors
     print("=" * 60)
-    print("STEP 2: Analyzing SRT with Gemini")
-    print("=" * 60)
-    try:
-        gemini_response_path = audio_cleaner.process_srt_file(srt_path)
-        
-        if not gemini_response_path:
-            print("Error: Gemini analysis failed or response file was not created")
-            return
-        
-        # Convert to absolute path to handle relative paths correctly
-        gemini_response_path = os.path.abspath(gemini_response_path)
-        
-        if not os.path.exists(gemini_response_path):
-            print(f"Error: Gemini response file was not found at: {gemini_response_path}")
-            return
-        
-        print(f"\n✓ Gemini analysis complete: {gemini_response_path}\n")
-    except Exception as e:
-        print(f"Error during Gemini analysis: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    # Step 4: Convert Gemini response to cut format
-    print("=" * 60)
-    print("STEP 3: Converting Gemini response to cut format")
+    print(f"STEP 2: Correcting Transcription Errors (Language: {detected_language})")
     print("=" * 60)
     try:
-        json_ranges_path = convert_gemini_response_to_cut_format(gemini_response_path)
-        
-        if not json_ranges_path:
-            print("Error: Failed to convert Gemini response to cut format")
-            return
-        
-        # Convert to absolute path to handle relative paths correctly
-        json_ranges_path = os.path.abspath(json_ranges_path)
-        
-        if not os.path.exists(json_ranges_path):
-            print(f"Error: Ranges JSON file was not found at: {json_ranges_path}")
-            return
-        
-        print(f"\n✓ Conversion complete: {json_ranges_path}\n")
-    except Exception as e:
-        print(f"Error during conversion: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    # Step 5: Cut video
-    print("=" * 60)
-    print("STEP 4: Cutting video")
-    print("=" * 60)
-    try:
-        output_video_path = cut_mp4.process_video(mp4_path, json_ranges_path)
-        
-        if not output_video_path:
-            print("Error: Video cutting failed or output file was not created")
-            return
-        
-        # Convert to absolute path to handle relative paths correctly
-        output_video_path = os.path.abspath(output_video_path)
-        
-        if not os.path.exists(output_video_path):
-            print(f"Error: Output video file was not found at: {output_video_path}")
-            return
-        
-        print(f"\n✓ Video cutting complete: {output_video_path}\n")
-    except Exception as e:
-        print(f"Error during video cutting: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-    
-    # Step 6: Correct SRT
-    print("=" * 60)
-    print("STEP 5: Correcting SRT")
-    print("=" * 60)
-    try:
-        corrected_srt_path = correct_srt.main(srt_path, json_ranges_path)
-        
-        if not corrected_srt_path:
-            print("Warning: SRT correction failed or file was not created")
-            corrected_srt_path = "Failed"
-        else:
-            # Convert to absolute path
-            corrected_srt_path = os.path.abspath(corrected_srt_path)
+        if not detected_language:
+            detected_language = "en"
+            print("Warning: Language was not detected, defaulting to 'en'")
             
-            if not os.path.exists(corrected_srt_path):
-                print(f"Error: Corrected SRT file was not found at: {corrected_srt_path}")
-                corrected_srt_path = "Not found"
-            else:
-                print(f"\n✓ SRT correction complete: {corrected_srt_path}\n")
+        corrected_transcription_path = correct_transcription.process_srt_correction(srt_path, detected_language)
+        
+        if corrected_transcription_path and os.path.exists(corrected_transcription_path):
+            corrected_transcription_path = os.path.abspath(corrected_transcription_path)
+            print(f"\n✓ Transcription correction complete: {corrected_transcription_path}\n")
+            # Update srt_path to use the corrected version for subsequent steps
+            srt_path = corrected_transcription_path
+        else:
+            print("Warning: Transcription correction failed or returned no file. Using original SRT.")
+            
     except Exception as e:
-        print(f"Error during SRT correction: {e}")
+        print(f"Error during transcription correction: {e}")
         import traceback
         traceback.print_exc()
-        corrected_srt_path = f"Error: {e}"
+        print("Continuing with original SRT...")
+    
+    # Step 3, 4, 5, 6: Cut video workflow (Skipped if No Cut mode)
+    if not no_cut_mode:
+        # Step 3: Analyze SRT with Gemini
+        print("=" * 60)
+        print("STEP 3: Analyzing SRT with Gemini")
+        print("=" * 60)
+        try:
+            gemini_response_path = audio_cleaner.process_srt_file(srt_path)
+            
+            if not gemini_response_path:
+                print("Error: Gemini analysis failed or response file was not created")
+                return
+            
+            # Convert to absolute path to handle relative paths correctly
+            gemini_response_path = os.path.abspath(gemini_response_path)
+            
+            if not os.path.exists(gemini_response_path):
+                print(f"Error: Gemini response file was not found at: {gemini_response_path}")
+                return
+            
+            print(f"\n✓ Gemini analysis complete: {gemini_response_path}\n")
+        except Exception as e:
+            print(f"Error during Gemini analysis: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # Step 4: Convert Gemini response to cut format
+        print("=" * 60)
+        print("STEP 4: Converting Gemini response to cut format")
+        print("=" * 60)
+        try:
+            json_ranges_path = convert_gemini_response_to_cut_format(gemini_response_path)
+            
+            if not json_ranges_path:
+                print("Error: Failed to convert Gemini response to cut format")
+                return
+            
+            # Convert to absolute path to handle relative paths correctly
+            json_ranges_path = os.path.abspath(json_ranges_path)
+            
+            if not os.path.exists(json_ranges_path):
+                print(f"Error: Ranges JSON file was not found at: {json_ranges_path}")
+                return
+            
+            print(f"\n✓ Conversion complete: {json_ranges_path}\n")
+        except Exception as e:
+            print(f"Error during conversion: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # Step 5: Cut video
+        print("=" * 60)
+        print("STEP 5: Cutting video")
+        print("=" * 60)
+        try:
+            output_video_path = cut_mp4.process_video(mp4_path, json_ranges_path)
+            
+            if not output_video_path:
+                print("Error: Video cutting failed or output file was not created")
+                return
+            
+            # Convert to absolute path to handle relative paths correctly
+            output_video_path = os.path.abspath(output_video_path)
+            
+            if not os.path.exists(output_video_path):
+                print(f"Error: Output video file was not found at: {output_video_path}")
+                return
+            
+            print(f"\n✓ Video cutting complete: {output_video_path}\n")
+        except Exception as e:
+            print(f"Error during video cutting: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+        
+        # Step 6: Correct SRT timestamps
+        print("=" * 60)
+        print("STEP 6: Correcting SRT timestamps")
+        print("=" * 60)
+        try:
+            corrected_srt_path = correct_srt.main(srt_path, json_ranges_path)
+            
+            if not corrected_srt_path:
+                print("Warning: SRT correction failed or file was not created")
+                corrected_srt_path = "Failed"
+            else:
+                # Convert to absolute path
+                corrected_srt_path = os.path.abspath(corrected_srt_path)
+                
+                if not os.path.exists(corrected_srt_path):
+                    print(f"Error: Corrected SRT file was not found at: {corrected_srt_path}")
+                    corrected_srt_path = "Not found"
+                else:
+                    print(f"\n✓ SRT correction complete: {corrected_srt_path}\n")
+        except Exception as e:
+            print(f"Error during SRT correction: {e}")
+            import traceback
+            traceback.print_exc()
+            corrected_srt_path = f"Error: {e}"
+    else:
+        print("\nSkipping Steps 3, 4, 5, 6 (Analysis & Cutting) due to No Cut mode selection.")
     
     # Step 7: Generate Chapters
     print("=" * 60)
-    print("STEP 6: Generating Chapters")
+    print("STEP 7: Generating Chapters")
     print("=" * 60)
     chapters_path = "Skipped"
     
@@ -380,7 +431,7 @@ def main():
     
     if valid_srt_for_chapters:
         try:
-            chapters_path = generate_chapters.generate_chapters(valid_srt_for_chapters)
+            chapters_path = generate_chapters.generate_chapters(valid_srt_for_chapters, language=detected_language)
             
             if not chapters_path:
                 print("Warning: Chapter generation failed")
@@ -402,15 +453,7 @@ def main():
     hours = int(elapsed_time // 3600)
     minutes = int((elapsed_time % 3600) // 60)
     seconds = int(elapsed_time % 60)
-    milliseconds = int((elapsed_time % 1) * 1000)
-    
-    time_str = ""
-    if hours > 0:
-        time_str = f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
-        time_str = f"{minutes}m {seconds}s"
-    else:
-        time_str = f"{seconds}.{milliseconds:03d}s"
+    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
     
     print("=" * 60)
     print("WORKFLOW COMPLETE!")
