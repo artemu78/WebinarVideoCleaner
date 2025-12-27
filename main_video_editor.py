@@ -251,6 +251,13 @@ def main():
     else:
         print("\nMode: Full Video Cleaner")
 
+    # Ask for Webinar Topic (Optional)
+    webinar_topic = input("Enter webinar topic (optional, press Enter to skip): ").strip()
+    if not webinar_topic:
+        webinar_topic = None
+    else:
+        print(f"Topic set to: {webinar_topic}")
+
     # Initialize variables that might be skipped
     gemini_response_path = "Skipped"
     json_ranges_path = "Skipped"
@@ -300,7 +307,7 @@ def main():
             detected_language = "en"
             print("Warning: Language was not detected, defaulting to 'en'")
             
-        corrected_transcription_path = correct_srt_errors.process_srt_correction(srt_path, detected_language)
+        corrected_transcription_path = correct_srt_errors.process_srt_correction(srt_path, detected_language, webinar_topic)
         
         if corrected_transcription_path and os.path.exists(corrected_transcription_path):
             corrected_transcription_path = os.path.abspath(corrected_transcription_path)

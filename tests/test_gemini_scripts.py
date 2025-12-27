@@ -100,6 +100,41 @@ class TestGeminiScripts(unittest.TestCase):
 
     @patch("common_utils.get_api_key", return_value="fake_key")
     @patch("os.path.exists", return_value=True)
+    @patch("os.remove")
+    def test_correct_transcription_process_with_topic(self, mock_remove, mock_exists, mock_get_key):
+         # Mock client instance
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        
+        # Mock upload
+        mock_file = MagicMock()
+        mock_file.uri = "http://fake/uri"
+        mock_file.name = "files/123"
+        mock_file.state.name = "ACTIVE"
+        mock_client.files.upload.return_value = mock_file
+        mock_client.files.get.return_value = mock_file
+        
+        # Mock generate_content
+        mock_response = MagicMock()
+        mock_response.text = '[{"id": "1", "text": "Corrected text"}]'
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
+        mock_client.models.generate_content.return_value = mock_response
+        
+        # Mock file content for parse_srt
+        mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
+        
+        with patch("builtins.open", mock_open(read_data=mock_srt_content)) as m_open:
+            output = process_srt_correction("test.srt", language="en", webinar_topic="Rocket Science")
+            
+            mock_client.files.upload.assert_called()
+            # Verify that generate_content was called (we can't easily check prompt content without deeper inspection of call args)
+            # But at least we verify it runs with the 3rd argument
+            mock_client.models.generate_content.assert_called()
+            self.assertIn("corrected_by_gemini.srt", output)
+
+    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("os.path.exists", return_value=True)
     def test_generate_chapters_process(self, mock_exists, mock_get_key):
          # Mock client instance
         mock_client = MagicMock()

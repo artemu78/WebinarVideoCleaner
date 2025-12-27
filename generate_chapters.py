@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost
+from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt
 
 load_dotenv()
 
@@ -157,6 +157,7 @@ def generate_chapters(srt_path, language=None):
 if __name__ == "__main__":
     # Ask user for SRT file path
     srt_file = input("Enter the path to the Corrected SRT file: ").strip()
+    language = input("Enter the language of the SRT file: ").strip()
     
     # Remove quotes
     if srt_file.startswith('"') and srt_file.endswith('"'):
@@ -169,9 +170,18 @@ if __name__ == "__main__":
         exit(1)
     
     if os.path.exists(srt_file):
+        start_time = time.time()
         print(f"\nGenerating chapters for: {srt_file}\n")
-        output_file = generate_chapters(srt_file)
+        output_file = generate_chapters(srt_file, language)
         if output_file:
             print(f"\nOutput file: {output_file}")
+            
+        end_time = time.time()
+        execution_time_ms = (end_time - start_time) * 1000
+        formatted_time = format_ms_to_srt(execution_time_ms)
+        total_cost = get_total_gemini_cost()
+
+        print(f"Total execution time: {formatted_time}")
+        print(f"Total cost: ${total_cost:.6f}")
     else:
         print(f"Error: File not found: {srt_file}")
