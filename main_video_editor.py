@@ -21,6 +21,7 @@ try:
     import correct_srt
     import generate_chapters
     import correct_transcription
+    import common_utils
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
     print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, correct_srt.py, generate_chapters.py, and correct_transcription.py are in the same directory.")
@@ -488,7 +489,10 @@ def main():
     print(f"Cleaned video:  {output_video_path}")
     print(f"Corrected SRT:  {corrected_srt_path}")
     print(f"Chapters file:  {chapters_path}")
-    print(f"\nTotal execution time: {time_str} ({elapsed_time:.3f} seconds)")
+    print(f"Total execution time: {time_str} ({elapsed_time:.3f} seconds)")
+    
+    total_cost = common_utils.get_total_gemini_cost()
+    print(f"Total Gemini Cost:    ${total_cost:.6f}")
     print("=" * 60)
 
 

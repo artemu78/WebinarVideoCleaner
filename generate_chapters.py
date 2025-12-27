@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key
+from common_utils import get_api_key, calculate_gemini_cost
 
 load_dotenv()
 
@@ -111,8 +111,11 @@ def generate_chapters(srt_path, language=None):
                 ),
                 prompt
             ]
+            ]
         )
-        print("✓ Response received from Gemini")
+        # Calculate and print cost
+        cost, input_tokens, output_tokens = calculate_gemini_cost(response)
+        print(f"✓ Response received from Gemini (Cost: ${cost:.6f} | Tokens: {input_tokens} in / {output_tokens} out)")
     except Exception as e:
         print(f"\n❌ Error generating content: {e}")
         try:

@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, clean_srt_response
+from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost
 
 load_dotenv()
 
@@ -116,7 +116,11 @@ def process_srt_correction(srt_path, language="en"):
                 ),
                 prompt
             ]
+            ]
         )
+        # Calculate and print cost
+        cost, input_tokens, output_tokens = calculate_gemini_cost(response)
+        print(f"  (Cost: ${cost:.6f} | Tokens: {input_tokens} in / {output_tokens} out)")
     except Exception as e:
         print(f"\n❌ Error generating content: {e}")
         # Cleanup

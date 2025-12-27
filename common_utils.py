@@ -86,3 +86,48 @@ def clean_srt_response(text):
     # Remove markdown code blocks
     text = text.replace("```srt", "").replace("```", "")
     return text.strip()
+
+# Cost tracking
+_TOTAL_GEMINI_COST = 0.0
+
+def calculate_gemini_cost(response):
+    """
+    Calculates the cost of a Gemini request based on token usage.
+    Pricing (Gemini 3 Flash preview):
+    - Input: $0.50 / 1M tokens
+    - Output: $3.00 / 1M tokens
+    
+    Updates the global total cost.
+    Returns: Tuple (cost, input_tokens, output_tokens)
+    """
+    global _TOTAL_GEMINI_COST
+    
+    if not hasattr(response, 'usage_metadata'):
+        return 0.0, 0, 0
+        
+    usage = response.usage_metadata
+    
+    # Check if usage is valid/populated
+    if not usage:
+        return 0.0, 0, 0
+        
+    input_tokens = usage.prompt_token_count or 0
+    output_tokens = usage.candidates_token_count or 0
+    
+    # Pricing
+    input_price_per_million = 0.50
+    output_price_per_million = 3.00
+    
+    input_cost = (input_tokens / 1_000_000) * input_price_per_million
+    output_cost = (output_tokens / 1_000_000) * output_price_per_million
+    
+    total_request_cost = input_cost + output_cost
+    
+    _TOTAL_GEMINI_COST += total_request_cost
+    
+    return total_request_cost, input_tokens, output_tokens
+
+def get_total_gemini_cost():
+    """Returns the total accumulated Gemini cost."""
+    global _TOTAL_GEMINI_COST
+    return _TOTAL_GEMINI_COST
