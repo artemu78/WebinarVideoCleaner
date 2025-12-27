@@ -24,7 +24,7 @@ sys.modules["dotenv"] = MagicMock()
 
 # Import scripts after mocking
 from audio_cleaner import process_srt_file
-from correct_srt_errors import process_srt_correction
+from correct_srt_errors import process_srt_correction, parse_srt, write_srt
 from generate_chapters import generate_chapters
 
 class TestGeminiScripts(unittest.TestCase):
@@ -161,6 +161,27 @@ class TestGeminiScripts(unittest.TestCase):
             mock_client.files.upload.assert_called()
             mock_client.models.generate_content.assert_called()
             self.assertIn("_chapters.txt", output)
+
+    def test_parse_srt(self):
+        srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+        with patch("builtins.open", mock_open(read_data=srt_content)):
+            blocks = parse_srt("dummy.srt")
+            self.assertEqual(len(blocks), 2)
+            self.assertEqual(blocks[0]['text'], "Hello")
+            self.assertEqual(blocks[1]['text'], "World")
+
+    def test_write_srt(self):
+        blocks = [
+            {'index': "1", 'start': "00:00:01,000", 'end': "00:00:02,000", 'text': "Hello"}
+        ]
+        with patch("builtins.open", mock_open()) as m:
+            write_srt(blocks, "output.srt")
+            m.assert_called_with("output.srt", 'w', encoding='utf-8')
+            handle = m()
+            args_list = handle.write.call_args_list
+            full_content = "".join([call[0][0] for call in args_list])
+            self.assertIn("00:00:01,000 --> 00:00:02,000", full_content)
+            self.assertIn("Hello", full_content)
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,9 +5,20 @@ from unittest.mock import patch, mock_open
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from apply_cuts_to_srt import map_time, apply_cuts_to_subs, parse_srt, save_srt
+from apply_cuts_to_srt import map_time, apply_cuts_to_subs, parse_srt, save_srt, load_cuts
 
 class TestCorrectSrt(unittest.TestCase):
+    
+    def test_load_cuts(self):
+        json_content = '[{"start": "00:00:01", "end": "00:00:02"}, {"start": "00:00:05", "end": "00:00:06"}]'
+        with patch("builtins.open", mock_open(read_data=json_content)):
+             with patch("os.path.exists", return_value=True):
+                cuts = load_cuts("dummy.json")
+                self.assertEqual(len(cuts), 2)
+                # 00:00:01 = 1000ms
+                self.assertEqual(cuts[0], (1000, 2000))
+                self.assertEqual(cuts[1], (5000, 6000))
+
     
     def test_map_time(self):
         # Cuts: remove 1000-2000
