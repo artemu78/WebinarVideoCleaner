@@ -20,3 +20,8 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["."]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit",
+]
