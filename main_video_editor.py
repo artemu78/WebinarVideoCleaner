@@ -18,13 +18,13 @@ try:
     import transcribe_to_srt
     import audio_cleaner
     import cut_mp4
-    import correct_srt
+    import apply_cuts_to_srt
     import generate_chapters
-    import correct_transcription
+    import correct_srt_errors
     import common_utils
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
-    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, correct_srt.py, generate_chapters.py, and correct_transcription.py are in the same directory.")
+    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, apply_cuts_to_srt.py, generate_chapters.py, and correct_srt_errors.py are in the same directory.")
     sys.exit(1)
 
 
@@ -300,7 +300,7 @@ def main():
             detected_language = "en"
             print("Warning: Language was not detected, defaulting to 'en'")
             
-        corrected_transcription_path = correct_transcription.process_srt_correction(srt_path, detected_language)
+        corrected_transcription_path = correct_srt_errors.process_srt_correction(srt_path, detected_language)
         
         if corrected_transcription_path and os.path.exists(corrected_transcription_path):
             corrected_transcription_path = os.path.abspath(corrected_transcription_path)
@@ -407,7 +407,7 @@ def main():
         print("STEP 6: Correcting SRT timestamps")
         print("=" * 60)
         try:
-            corrected_srt_path = correct_srt.main(srt_path, json_ranges_path)
+            corrected_srt_path = apply_cuts_to_srt.main(srt_path, json_ranges_path)
             
             if not corrected_srt_path:
                 print("Warning: SRT correction failed or file was not created")

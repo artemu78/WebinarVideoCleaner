@@ -24,7 +24,7 @@ sys.modules["dotenv"] = MagicMock()
 
 # Import scripts after mocking
 from audio_cleaner import process_srt_file
-from correct_transcription import process_srt_correction
+from correct_srt_errors import process_srt_correction
 from generate_chapters import generate_chapters
 
 class TestGeminiScripts(unittest.TestCase):
