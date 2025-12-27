@@ -111,7 +111,6 @@ def generate_chapters(srt_path, language=None):
                 ),
                 prompt
             ]
-            ]
         )
         # Calculate and print cost
         cost, input_tokens, output_tokens = calculate_gemini_cost(response)

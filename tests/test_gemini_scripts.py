@@ -13,7 +13,13 @@ mock_google.genai = mock_genai
 sys.modules["google"] = mock_google
 sys.modules["google.genai"] = mock_genai
 sys.modules["google.genai.types"] = MagicMock() 
-sys.modules["google.genai.errors"] = MagicMock()
+
+# Define a real exception class for ClientError
+mock_errors = MagicMock()
+class MockClientError(Exception):
+    pass
+mock_errors.ClientError = MockClientError
+sys.modules["google.genai.errors"] = mock_errors
 sys.modules["dotenv"] = MagicMock()
 
 # Import scripts after mocking
@@ -45,6 +51,8 @@ class TestGeminiScripts(unittest.TestCase):
         # Mock generate_content
         mock_response = MagicMock()
         mock_response.text = '{"ranges_to_delete": []}'
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
         mock_client.models.generate_content.return_value = mock_response
         
         # Run
@@ -75,6 +83,8 @@ class TestGeminiScripts(unittest.TestCase):
         # Mock generate_content
         mock_response = MagicMock()
         mock_response.text = "1\n00:01:00,000 --> 00:01:02,000\nCorrected text"
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
         mock_client.models.generate_content.return_value = mock_response
         
         with patch("builtins.open", mock_open()) as m_open:
@@ -102,6 +112,8 @@ class TestGeminiScripts(unittest.TestCase):
         # Mock generate_content
         mock_response = MagicMock()
         mock_response.text = "00:00:00 - Intro"
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
         mock_client.models.generate_content.return_value = mock_response
         
         with patch("builtins.open", mock_open()) as m_open:

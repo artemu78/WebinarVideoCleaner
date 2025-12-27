@@ -116,7 +116,6 @@ def process_srt_correction(srt_path, language="en"):
                 ),
                 prompt
             ]
-            ]
         )
         # Calculate and print cost
         cost, input_tokens, output_tokens = calculate_gemini_cost(response)
