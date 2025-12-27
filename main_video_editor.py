@@ -470,10 +470,7 @@ def main():
 
     # Summary
     elapsed_time = time.time() - start_time
-    hours = int(elapsed_time // 3600)
-    minutes = int((elapsed_time % 3600) // 60)
-    seconds = int(elapsed_time % 60)
-    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    time_str = common_utils.format_ms_to_srt(elapsed_time * 1000)
     
     script_end_dt = datetime.now()
     
@@ -489,7 +486,7 @@ def main():
     print(f"Cleaned video:  {output_video_path}")
     print(f"Corrected SRT:  {corrected_srt_path}")
     print(f"Chapters file:  {chapters_path}")
-    print(f"Total execution time: {time_str} ({elapsed_time:.3f} seconds)")
+    print(f"Total execution time: {time_str}")
     
     total_cost = common_utils.get_total_gemini_cost()
     print(f"Total Gemini Cost:    ${total_cost:.6f}")

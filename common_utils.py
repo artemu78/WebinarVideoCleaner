@@ -69,6 +69,7 @@ def format_ms_to_srt(ms):
     """
     Formats milliseconds to 'HH:MM:SS,mmm'.
     """
+    ms = int(ms)
     seconds = ms // 1000
     milliseconds = ms % 1000
     minutes = seconds // 60

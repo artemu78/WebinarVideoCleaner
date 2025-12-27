@@ -46,6 +46,9 @@ class TestCommonUtils(unittest.TestCase):
         self.assertEqual(format_ms_to_srt(60000), "00:01:00,000")
         self.assertEqual(format_ms_to_srt(3661000), "01:01:01,000")
         
+        # Float input
+        self.assertEqual(format_ms_to_srt(1234.56), "00:00:01,234")
+        
     def test_clean_srt_response(self):
         text = "```srt\n1\n00:00:01,000 --> 00:00:02,000\nHello\n```"
         expected = "1\n00:00:01,000 --> 00:00:02,000\nHello"
