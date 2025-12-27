@@ -3,46 +3,9 @@ import json
 import re
 import os
 import sys
+from common_utils import parse_time_to_ms, format_ms_to_srt
 
-def parse_time_to_ms(time_str):
-    """
-    Parses timestamp to milliseconds.
-    Supports 'HH:MM:SS,mmm' (SRT) and 'HH:MM:SS' (Simple).
-    """
-    time_str = time_str.strip()
-    # SRT format
-    if ',' in time_str:
-        hms, ms = time_str.split(',')
-    elif '.' in time_str:
-         hms, ms = time_str.split('.')
-    else:
-        hms = time_str
-        ms = '000'
 
-    parts = hms.split(':')
-    if len(parts) == 3:
-        h, m, s = map(int, parts)
-    elif len(parts) == 2:
-        h = 0
-        m, s = map(int, parts)
-    else:
-        return 0
-    
-    return (h * 3600 + m * 60 + s) * 1000 + int(ms)
-
-def format_ms_to_srt(ms):
-    """
-    Formats milliseconds to 'HH:MM:SS,mmm'.
-    """
-    seconds = ms // 1000
-    milliseconds = ms % 1000
-    minutes = seconds // 60
-    hours = minutes // 60
-    
-    seconds %= 60
-    minutes %= 60
-    
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 def load_cuts(json_path):
     """

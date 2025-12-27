@@ -2,6 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
+from common_utils import get_api_key
 
 load_dotenv()
 
@@ -19,43 +20,7 @@ except ImportError as e:
     print("\nOr install the package: pip install google-genai")
     exit(1)
 
-def get_api_key(filepath="gemini_key.txt"):
-    """
-    Reads the Gemini API key.
-    Priority:
-    1. Environment variable GEMINI_API_KEY
-    2. Local file (default: gemini_key.txt)
-    3. User input (and optionally saves to .env)
-    """
-    # 1. Check environment variable
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        return api_key.strip()
-    
-    # 2. Check local file (legacy support)
-    if os.path.exists(filepath):
-        with open(filepath, "r") as f:
-            return f.read().strip()
-    
-    # 3. Prompt user
-    print(f"Gemini API key not found in environment or file: {filepath}")
-    api_key = input("Please enter your Gemini API key: ").strip()
-    
-    if not api_key:
-        print("Error: No API key provided.")
-        exit(1)
-    
-    # Ask if user wants to save to .env
-    save_env = input("Save to .env file? (y/n, default y): ").strip().lower()
-    if save_env != 'n':
-        try:
-            with open(".env", "a") as f:
-                f.write(f"\nGEMINI_API_KEY={api_key}\n")
-            print("✓ API key saved to .env")
-        except Exception as e:
-            print(f"Warning: Could not save API key to .env: {e}")
-            
-    return api_key
+
 
 def generate_chapters(srt_path, language=None):
     """Upload SRT file to Gemini and get chapters/timecodes."""

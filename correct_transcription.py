@@ -2,6 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
+from common_utils import get_api_key, clean_srt_response
 
 load_dotenv()
 
@@ -15,43 +16,9 @@ except ImportError as e:
     print("Please install the package: pip install google-genai")
     exit(1)
 
-def get_api_key(filepath="gemini_key.txt"):
-    """
-    Reads the Gemini API key.
-    Priority:
-    1. Environment variable GEMINI_API_KEY
-    2. Local file (default: gemini_key.txt)
-    3. User input
-    """
-    # 1. Check environment variable
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        return api_key.strip()
-    
-    # 2. Check local file (legacy support)
-    if os.path.exists(filepath):
-        with open(filepath, "r") as f:
-            return f.read().strip()
-    
-    # 3. Prompt user (only if running directly, not when imported usually)
-    # But since this is a utility script, we might not want to prompt if imported.
-    # We'll assume the main script handles env setup or we prompt if missing.
-    print(f"Gemini API key not found in environment or file: {filepath}")
-    api_key = input("Please enter your Gemini API key: ").strip()
-    
-    if not api_key:
-        print("Error: No API key provided.")
-        exit(1)
-            
-    return api_key
 
-def clean_srt_response(text):
-    """
-    Clean the response from Gemini to extract just the SRT content.
-    """
-    # Remove markdown code blocks
-    text = text.replace("```srt", "").replace("```", "")
-    return text.strip()
+
+
 
 def process_srt_correction(srt_path, language="en"):
     """
