@@ -258,6 +258,36 @@ def main():
     else:
         print(f"Topic set to: {webinar_topic}")
 
+    # Ask for Model
+    print("\nSelect Whisper Model:")
+    print("1. turbo (default - fast)")
+    print("2. small")
+    print("3. medium")
+    print("4. large")
+    model_choice = input("Enter model choice (default 'turbo'): ").strip().lower()
+
+    if model_choice in ['2', 'small']:
+        model = "small"
+    elif model_choice in ['3', 'medium']:
+        model = "medium"
+    elif model_choice in ['4', 'large']:
+        model = "large"
+    else:
+        model = "turbo"
+    print(f"Selected model: {model}")
+
+    # Ask for Language
+    print("\nSelect Webinar Language:")
+    print(transcribe_to_srt.get_language_codes_help())
+    lang_input = input("Enter language code (e.g., 'en', 'ru') or press Enter for auto-detect: ").strip()
+
+    language = None
+    if lang_input:
+        language = lang_input.lower()
+        print(f"Selected language: {language}")
+    else:
+        print("Language: Auto-detect")
+
     # Initialize variables that might be skipped
     gemini_response_path = "Skipped"
     json_ranges_path = "Skipped"
@@ -272,10 +302,10 @@ def main():
     try:
         srt_path, detected_language = transcribe_to_srt.main(
             file_input=mp4_path,
-            model="small",
+            model=model,
             max_segment_duration=8.0,
             use_srt=True,
-            language=None  # Auto-detect
+            language=language
         )
         
         if not srt_path:

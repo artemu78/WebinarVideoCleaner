@@ -305,7 +305,7 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
             
             try:
                 detected_lang, confidence = detect_language(whisper_model, detection_path)
-                print(f"\nDetected language: {detected_lang}")
+                print(f"\nDetected language: {detected_lang}. Confidence: {confidence:.2%}")
                 
                 # Skip approval if confidence is above 90%
                 if confidence is not None and confidence > 0.9:
