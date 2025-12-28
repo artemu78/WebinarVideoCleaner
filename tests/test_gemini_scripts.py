@@ -161,6 +161,35 @@ class TestGeminiScripts(unittest.TestCase):
             mock_client.files.upload.assert_called()
             mock_client.models.generate_content.assert_called()
             self.assertIn("_chapters.txt", output)
+            
+    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("os.path.exists", return_value=True)
+    def test_generate_chapters_process_with_topic(self, mock_exists, mock_get_key):
+         # Mock client instance
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        
+        # Mock upload
+        mock_file = MagicMock()
+        mock_file.uri = "http://fake/uri"
+        mock_file.name = "files/123"
+        mock_file.state.name = "ACTIVE"
+        mock_client.files.upload.return_value = mock_file
+        mock_client.files.get.return_value = mock_file
+        
+        # Mock generate_content
+        mock_response = MagicMock()
+        mock_response.text = "00:00:00 - Intro"
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
+        mock_client.models.generate_content.return_value = mock_response
+        
+        with patch("builtins.open", mock_open()) as m_open:
+            output = generate_chapters("test.srt", webinar_topic="Rocket Science")
+            
+            mock_client.files.upload.assert_called()
+            mock_client.models.generate_content.assert_called()
+            self.assertIn("_chapters.txt", output)
 
     def test_parse_srt(self):
         srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"

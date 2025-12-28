@@ -129,6 +129,11 @@ class TestMainVideoEditor(unittest.TestCase):
                 os.path.abspath("video.srt"), "en", None
             )
 
+            # Verify generate_chapters called with webinar topic None
+            mock_chapters.generate_chapters.assert_called_once_with(
+                os.path.abspath("video_cleaned.srt"), language="en", webinar_topic=None
+            )
+
     @patch('main_video_editor.transcribe_to_srt')
     @patch('main_video_editor.correct_srt_errors')
     @patch('main_video_editor.audio_cleaner')
@@ -160,6 +165,7 @@ class TestMainVideoEditor(unittest.TestCase):
             mock_convert.return_value = "ranges.json"
             mock_cut.process_video.return_value = "video_cleaned.mp4"
             mock_apply.main.return_value = "video_cleaned.srt"
+            mock_chapters.generate_chapters.return_value = "chapters.txt"
             
             # Run main
             main()
@@ -177,6 +183,11 @@ class TestMainVideoEditor(unittest.TestCase):
             # Verify correct_srt_errors called with correct topic
             mock_correct.process_srt_correction.assert_called_once_with(
                 os.path.abspath("video.srt"), "en", "My Topic"
+            )
+
+            # Verify generate_chapters called with correct topic
+            mock_chapters.generate_chapters.assert_called_once_with(
+                os.path.abspath("video_cleaned.srt"), language="en", webinar_topic="My Topic"
             )
 
 if __name__ == '__main__':

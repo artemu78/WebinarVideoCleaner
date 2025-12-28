@@ -93,12 +93,20 @@ def extract_mp3_from_mp4(mp4_path):
     Extract MP3 audio track from MP4 file using ffmpeg.
     Returns path to the extracted MP3 file.
     """
-    print(f"Extracting audio from MP4: {mp4_path}")
     
     # Create a temporary MP3 file in the same directory as the MP4
     mp4_dir = os.path.dirname(os.path.abspath(mp4_path))
     mp4_basename = os.path.splitext(os.path.basename(mp4_path))[0]
     mp3_path = os.path.join(mp4_dir, f"{mp4_basename}_extracted.mp3")
+
+    if os.path.exists(mp3_path):
+        print(f"Extracted audio file already exists: {mp3_path}")
+        recreate = input("Re-create it? (y/n): ").strip().lower()
+        if recreate != 'y':
+            print(f"Using existing audio file: {mp3_path}")
+            return mp3_path
+
+    print(f"Extracting audio from MP4: {mp4_path}")
     
     # Construct the ffmpeg command to extract audio
     command = [

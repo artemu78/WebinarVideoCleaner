@@ -486,7 +486,7 @@ def main():
     
     if valid_srt_for_chapters:
         try:
-            chapters_path = generate_chapters.generate_chapters(valid_srt_for_chapters, language=detected_language)
+            chapters_path = generate_chapters.generate_chapters(valid_srt_for_chapters, language=detected_language, webinar_topic=webinar_topic)
             
             if not chapters_path:
                 print("Warning: Chapter generation failed")

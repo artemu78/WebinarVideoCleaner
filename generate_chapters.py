@@ -22,7 +22,7 @@ except ImportError as e:
 
 
 
-def generate_chapters(srt_path, language=None):
+def generate_chapters(srt_path, language=None, webinar_topic=None):
     """Upload SRT file to Gemini and get chapters/timecodes."""
     
     # Step 1: Initialize Client
@@ -80,8 +80,13 @@ def generate_chapters(srt_path, language=None):
         # Gemini understands codes.
         lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
 
+    topic_instruction = ""
+    if webinar_topic:
+        topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context to create more accurate and meaningful chapter titles."
+
     prompt = f"""
     Analyze the uploaded SRT subtitles for this webinar/video.
+    {topic_instruction}
     {lang_instruction}
     
     Your task is to create a list of timestamps (chapters) that summarize the entire content.
@@ -158,7 +163,8 @@ if __name__ == "__main__":
     # Ask user for SRT file path
     srt_file = input("Enter the path to the Corrected SRT file: ").strip()
     language = input("Enter the language of the SRT file: ").strip()
-    
+    webinar_topic = input("Enter the topic of the webinar: ").strip()
+
     # Remove quotes
     if srt_file.startswith('"') and srt_file.endswith('"'):
         srt_file = srt_file[1:-1]
@@ -172,7 +178,7 @@ if __name__ == "__main__":
     if os.path.exists(srt_file):
         start_time = time.time()
         print(f"\nGenerating chapters for: {srt_file}\n")
-        output_file = generate_chapters(srt_file, language)
+        output_file = generate_chapters(srt_file, language, webinar_topic)
         if output_file:
             print(f"\nOutput file: {output_file}")
             
