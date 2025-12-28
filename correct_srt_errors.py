@@ -91,7 +91,7 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
     
     # Step 3: Batch Processing
     # We split into batches of 50 to avoid hitting output token limits (usually 8192)
-    BATCH_SIZE = 50
+    BATCH_SIZE = 20000
     batches = [original_blocks[i:i + BATCH_SIZE] for i in range(0, len(original_blocks), BATCH_SIZE)]
     print(f"Split into {len(batches)} batches for processing (Batch Size: {BATCH_SIZE}).")
     
