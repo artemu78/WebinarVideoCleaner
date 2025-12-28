@@ -169,11 +169,11 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
         """
 
         # Call Gemini
-        print("  Requesting correction from Gemini (model: gemini-2.0-flash-exp)...")
+        print("  Requesting correction from Gemini (model: gemini-2.5-flash)...")
         response = None
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1,
