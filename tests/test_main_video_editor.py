@@ -75,6 +75,7 @@ class TestMainVideoEditor(unittest.TestCase):
                 self.assertIn('"start": "00:00:01"', written_content)
                 self.assertIn('"end": "00:00:02"', written_content)
 
+    @patch('main_video_editor.check_srt_alignment')
     @patch('main_video_editor.transcribe_to_srt')
     @patch('main_video_editor.correct_srt_errors')
     @patch('main_video_editor.audio_cleaner')
@@ -86,7 +87,7 @@ class TestMainVideoEditor(unittest.TestCase):
     @patch('os.path.exists')
     def test_main_interactive_defaults(self, mock_exists, mock_input, 
                                      mock_utils, mock_chapters, mock_apply, mock_cut, 
-                                     mock_cleaner, mock_correct, mock_transcribe):
+                                     mock_cleaner, mock_correct, mock_transcribe, mock_check):
         # Setup mocks
         mock_exists.return_value = True
         mock_input.side_effect = [
@@ -102,6 +103,7 @@ class TestMainVideoEditor(unittest.TestCase):
         mock_correct.process_srt_correction.return_value = "video_corrected.srt"
         mock_cleaner.process_srt_file.return_value = "gemini_response.txt"
         mock_utils.get_total_gemini_cost.return_value = 0.0
+        mock_check.check_alignment.return_value = True
         
         # Determine how to mock convert_gemini_response_to_cut_format since it's imported directly
         # We can mock it in the test using patch.object or patch the imported name in main_video_editor
@@ -133,7 +135,11 @@ class TestMainVideoEditor(unittest.TestCase):
             mock_chapters.generate_chapters.assert_called_once_with(
                 os.path.abspath("video_cleaned.srt"), language="en", webinar_topic=None
             )
+            
+            # Verify alignment check called
+            mock_check.check_alignment.assert_called_once()
 
+    @patch('main_video_editor.check_srt_alignment')
     @patch('main_video_editor.transcribe_to_srt')
     @patch('main_video_editor.correct_srt_errors')
     @patch('main_video_editor.audio_cleaner')
@@ -145,7 +151,7 @@ class TestMainVideoEditor(unittest.TestCase):
     @patch('os.path.exists')
     def test_main_interactive_specifics(self, mock_exists, mock_input, 
                                      mock_utils, mock_chapters, mock_apply, mock_cut, 
-                                     mock_cleaner, mock_correct, mock_transcribe):
+                                     mock_cleaner, mock_correct, mock_transcribe, mock_check):
         # Setup mocks
         mock_exists.return_value = True
         mock_input.side_effect = [
@@ -156,6 +162,7 @@ class TestMainVideoEditor(unittest.TestCase):
             "ru",        # Language (Russian)
         ]
         
+        mock_check.check_alignment.return_value = True
         mock_transcribe.main.return_value = ("video.srt", "en")
         mock_correct.process_srt_correction.return_value = "video_corrected.srt"
         mock_cleaner.process_srt_file.return_value = "gemini_response.txt"
@@ -189,6 +196,9 @@ class TestMainVideoEditor(unittest.TestCase):
             mock_chapters.generate_chapters.assert_called_once_with(
                 os.path.abspath("video_cleaned.srt"), language="en", webinar_topic="My Topic"
             )
+            
+            # Verify alignment check called
+            mock_check.check_alignment.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

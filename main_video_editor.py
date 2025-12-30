@@ -22,9 +22,10 @@ try:
     import generate_chapters
     import correct_srt_errors
     import common_utils
+    import check_srt_alignment
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
-    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, apply_cuts_to_srt.py, generate_chapters.py, and correct_srt_errors.py are in the same directory.")
+    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, apply_cuts_to_srt.py, generate_chapters.py, correct_srt_errors.py, and check_srt_alignment.py are in the same directory.")
     sys.exit(1)
 
 
@@ -203,7 +204,8 @@ def main():
     5. Convert Gemini response to cut format
     6. Cut video
     7. Correct SRT timestamps
-    8. Generate Chapters
+    8. Check SRT Alignment
+    9. Generate Chapters
     """
     start_time = time.time()
     script_start_dt = datetime.now()
@@ -467,10 +469,42 @@ def main():
     else:
         print("\nSkipping Steps 3, 4, 5, 6 (Analysis & Cutting) due to No Cut mode selection.")
     
-    # Step 7: Generate Chapters
+
+    # Step 7: Check SRT Alignment
     step_start_time = time.time()
     print("=" * 60)
-    print("STEP 7: Generating Chapters")
+    print("STEP 7: Checking SRT Alignment")
+    print("=" * 60)
+    
+    # Determine which SRT to check
+    # Priority: corrected_srt_path (if exists and valid), else srt_path
+    srt_to_check = None
+    if corrected_srt_path and corrected_srt_path not in ["Skipped", "Failed", "Not found"] and os.path.exists(corrected_srt_path):
+        srt_to_check = corrected_srt_path
+    elif srt_path and os.path.exists(srt_path):
+        srt_to_check = srt_path
+        
+    if srt_to_check:
+        try:
+            is_aligned = check_srt_alignment.check_alignment(srt_to_check)
+            if not is_aligned:
+                print("Warning: SRT alignment check failed. There are overlaps or timing issues.")
+                print("Continuing, but chapter generation might be affected.")
+            else:
+                print(f"\n✓ SRT alignment check passed: {srt_to_check}\n")
+        except Exception as e:
+            print(f"Error during alignment check: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("Warning: No SRT file available to check.")
+        
+    print(f"Step 7 duration: {time.time() - step_start_time:.2f} seconds")
+
+    # Step 8: Generate Chapters
+    step_start_time = time.time()
+    print("=" * 60)
+    print("STEP 8: Generating Chapters")
     print("=" * 60)
     chapters_path = "Skipped"
     
@@ -503,7 +537,7 @@ def main():
         print("Error: No valid SRT file available for chapter generation.")
         chapters_path = "No input SRT"
     
-    print(f"Step 7 duration: {time.time() - step_start_time:.2f} seconds")
+    print(f"Step 8 duration: {time.time() - step_start_time:.2f} seconds")
 
     # Summary
     elapsed_time = time.time() - start_time
