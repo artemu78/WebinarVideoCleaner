@@ -260,6 +260,17 @@ def main():
     else:
         print(f"Topic set to: {webinar_topic}")
 
+    # Ask for Audio File Usage
+    use_audio_for_analysis = False
+    if not no_cut_mode:
+        print("\nGemini Analysis Options:")
+        audio_choice = input("Use audio file to identify ranges to remove? (y/n, default n): ").strip().lower()
+        if audio_choice == 'y':
+            use_audio_for_analysis = True
+            print("Audio file will be used for analysis (this may take longer to upload).")
+        else:
+            print("Using SRT only.")
+
     # Ask for Model
     print("\nSelect Whisper Model:")
     print("1. turbo (default - fast)")
@@ -307,7 +318,8 @@ def main():
             model=model,
             max_segment_duration=8.0,
             use_srt=True,
-            language=language
+            language=language,
+            webinar_topic=webinar_topic
         )
         
         if not srt_path:
@@ -365,7 +377,35 @@ def main():
         print("STEP 3: Analyzing SRT with Gemini")
         print("=" * 60)
         try:
-            gemini_response_path = audio_cleaner.process_srt_file(srt_path)
+            audio_path_for_analysis = None
+            if use_audio_for_analysis:
+                print("Extracting audio for analysis...")
+                try:
+                    # Reuse extract_mp3_from_mp4 from transcribe_to_srt
+                    audio_path_for_analysis = transcribe_to_srt.extract_mp3_from_mp4(mp4_path)
+                    # Get absolute path
+                    if audio_path_for_analysis:
+                        audio_path_for_analysis = os.path.abspath(audio_path_for_analysis)
+                        print(f"Audio extracted: {audio_path_for_analysis}")
+                except Exception as e:
+                    print(f"Warning: Failed to extract audio: {e}. Proceeding with SRT only.")
+                    audio_path_for_analysis = None
+
+            gemini_response_path = audio_cleaner.process_srt_file(srt_path, audio_path=audio_path_for_analysis)
+            
+            # Clean up extracted audio if we created it specifically for this and successful
+            if audio_path_for_analysis and os.path.exists(audio_path_for_analysis):
+                try:
+                    # Ask user or just keep it? 
+                    # Usually clean up temp files. But let's keep it consistent with other usage or just clean up.
+                    # transcribe_to_srt prompts reuse, so maybe better to leave it?
+                    # The prompt says "Reuse existing audio file: ...", so leaving it is fine.
+                    # But for a cleaner workflow, if the user didn't ask to keep it...
+                    # Let's leave it for now to avoid accidental deletion of reusable assets, 
+                    # or subsequent runs might need it.
+                    pass 
+                except:
+                    pass
             
             if not gemini_response_path:
                 print("Error: Gemini analysis failed or response file was not created")

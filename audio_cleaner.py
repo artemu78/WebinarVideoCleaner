@@ -1,12 +1,11 @@
 #!/Users/artemreva/projects/whisper/venv/bin/python3
 import os
-import json
 import time
 from dotenv import load_dotenv
 from common_utils import get_api_key, calculate_gemini_cost
 
 load_dotenv()
-
+audio_cleaner_model = "gemini-3-flash-preview"
 # Check if google.genai is available
 try:
     import google.genai as genai
@@ -23,8 +22,8 @@ except ImportError as e:
 
 
 
-def process_srt_file(srt_path):
-    """Upload SRT file to Gemini and get response, saving it as txt file."""
+def process_srt_file(srt_path, audio_path=None):
+    """Upload SRT file (and optional audio) to Gemini and get response, saving it as txt file."""
     
     # Step 1: Initialize Client
     print("Step 1: Initializing Gemini client...")
@@ -39,11 +38,11 @@ def process_srt_file(srt_path):
         return
     
     try:
-        uploaded_file = client.files.upload(
-    file=srt_path,
-    config=types.UploadFileConfig(mime_type="text/plain")
-)
-        print(f"✓ File uploaded successfully. File URI: {uploaded_file.uri}")
+        uploaded_srt = client.files.upload(
+            file=srt_path,
+            config=types.UploadFileConfig(mime_type="text/plain")
+        )
+        print(f"✓ SRT file uploaded successfully. File URI: {uploaded_srt.uri}")
     except ClientError as e:
         error_message = str(e)
         if "location is not supported" in error_message.lower() or "FAILED_PRECONDITION" in error_message:
@@ -55,36 +54,69 @@ def process_srt_file(srt_path):
             print("  2. Use the API from a supported geographic location")
             print("  3. Check Google's Gemini API availability in your region")
         else:
-            print(f"\n❌ Error uploading file: {e}")
+            print(f"\n❌ Error uploading SRT file: {e}")
         return None
     except Exception as e:
-        print(f"\n❌ Unexpected error uploading file: {e}")
+        print(f"\n❌ Unexpected error uploading SRT file: {e}")
         return None
+
+    # Step 2b: Upload Audio file (if provided)
+    uploaded_audio = None
+    if audio_path:
+        print(f"Step 2b: Uploading Audio file: {audio_path}...")
+        if not os.path.exists(audio_path):
+            print(f"Warning: Audio file not found: {audio_path}. Proceeding with SRT only.")
+        else:
+            try:
+                # Determine mime type based on extension
+                mime_type = "audio/mpeg"  # default
+                if audio_path.lower().endswith(".mp3"):
+                    mime_type = "audio/mp3"
+                elif audio_path.lower().endswith(".wav"):
+                    mime_type = "audio/wav"
+                elif audio_path.lower().endswith(".aac"):
+                    mime_type = "audio/aac"
+                # Add more if needed or rely on default
+
+                uploaded_audio = client.files.upload(
+                    file=audio_path,
+                    config=types.UploadFileConfig(mime_type=mime_type)
+                )
+                print(f"✓ Audio file uploaded successfully. File URI: {uploaded_audio.uri}")
+            except Exception as e:
+                print(f"\n❌ Error uploading Audio file: {e}. Proceeding with SRT only.")
+                uploaded_audio = None
     
-    # Step 3: Wait for file to be processed
-    print("Step 3: Waiting for file to be processed...")
-    try:
-        while uploaded_file.state.name == "PROCESSING":
-            print("  File is still processing, waiting...")
-            time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
-        
-        if uploaded_file.state.name == "FAILED":
-            print("Error: File processing failed")
+    # Step 3: Wait for files to be processed
+    print("Step 3: Waiting for files to be processed...")
+    files_to_wait = [uploaded_srt]
+    if uploaded_audio:
+        files_to_wait.append(uploaded_audio)
+
+    for f_obj in files_to_wait:
+        try:
+            while f_obj.state.name == "PROCESSING":
+                print(f"  File {f_obj.name} is still processing, waiting...")
+                time.sleep(2)
+                f_obj = client.files.get(name=f_obj.name)
+            
+            if f_obj.state.name == "FAILED":
+                print(f"Error: File processing failed for {f_obj.name}")
+                return None
+        except ClientError as e:
+            print(f"\n❌ Error during file processing: {e}")
             return None
-    except ClientError as e:
-        print(f"\n❌ Error during file processing: {e}")
-        return None
-    except Exception as e:
-        print(f"\n❌ Unexpected error during file processing: {e}")
-        return None
+        except Exception as e:
+            print(f"\n❌ Unexpected error during file processing: {e}")
+            return None
     
-    print("✓ File processed successfully")
+    print("✓ Files processed successfully")
     
     # Step 4: Define the Prompt
     print("Step 4: Preparing prompt...")
-    prompt = """
-    Analyze the uploaded SRT subtitles:
+    
+    base_prompt = """
+    Analyze the uploaded SRT subtitles{audio_clause}:
     
     Identify all ranges that should be removed. 
     Focus on:
@@ -101,20 +133,38 @@ def process_srt_file(srt_path):
       ]
     }}
     """
+    
+    audio_clause = ""
+    if uploaded_audio:
+        audio_clause = " AND the audio file. Use the audio to confirm silences, identify non-verbal cues, and filler words not present in the text"
+    
+    prompt = base_prompt.format(audio_clause=audio_clause)
     print("✓ Prompt prepared")
     
-    # Step 5: Call Gemini 3 with uploaded file
-    print("Step 5: Requesting analysis from Gemini 3 Flash model...")
+    # Step 5: Call Gemini with uploaded files
+    print(f"Step 5: Requesting analysis from {audio_cleaner_model} model...")
+    content_parts = []
+    
+    # Add SRT
+    content_parts.append(types.Part.from_uri(
+        file_uri=uploaded_srt.uri,
+        mime_type=uploaded_srt.mime_type
+    ))
+    
+    # Add Audio if available
+    if uploaded_audio:
+        content_parts.append(types.Part.from_uri(
+            file_uri=uploaded_audio.uri,
+            mime_type=uploaded_audio.mime_type
+        ))
+        
+    # Add Prompt
+    content_parts.append(prompt)
+
     try:
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=[
-                types.Part.from_uri(
-                    file_uri=uploaded_file.uri,
-                    mime_type=uploaded_file.mime_type
-                ),
-                prompt
-            ]
+            model=audio_cleaner_model,
+            contents=content_parts
         )
         # Calculate and print cost
         cost, input_tokens, output_tokens = calculate_gemini_cost(response)
@@ -163,13 +213,19 @@ def process_srt_file(srt_path):
         f.write(response.text)
     print(f"✓ Response saved to: {output_filename}")
     
-    # Step 7: Clean up uploaded file
-    print("Step 7: Cleaning up uploaded file...")
-    try:
-        client.files.delete(name=uploaded_file.name)
-        print("✓ Uploaded file deleted from Gemini")
-    except Exception as e:
-        print(f"  Warning: Could not delete uploaded file: {e}")
+    # Step 7: Clean up uploaded files
+    print("Step 7: Cleaning up uploaded files...")
+    
+    files_to_delete = [uploaded_srt]
+    if uploaded_audio:
+        files_to_delete.append(uploaded_audio)
+
+    for f_obj in files_to_delete:
+        try:
+            client.files.delete(name=f_obj.name)
+            print(f"✓ Uploaded file {f_obj.name} deleted from Gemini")
+        except Exception as e:
+            print(f"  Warning: Could not delete uploaded file {f_obj.name}: {e}")
     
     print("\n=== Process completed successfully ===")
     return output_filename

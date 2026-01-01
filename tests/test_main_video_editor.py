@@ -94,6 +94,7 @@ class TestMainVideoEditor(unittest.TestCase):
             "video.mp4", # File path
             "1",         # Mode 1 (Full)
             "",          # Topic (skip)
+            "",          # Audio option (default n)
             "",          # Model (default turbo)
             "",          # Language (default auto)
         ]
@@ -123,7 +124,8 @@ class TestMainVideoEditor(unittest.TestCase):
                 model="turbo",          # DEFAULT verification
                 max_segment_duration=8.0,
                 use_srt=True,
-                language=None           # DEFAULT verification
+                language=None,           # DEFAULT verification
+                webinar_topic=None       # DEFAULT verification
             )
             
             # Verify correct_srt_errors called with webinar topic None
@@ -138,6 +140,9 @@ class TestMainVideoEditor(unittest.TestCase):
             
             # Verify alignment check called
             mock_check.check_alignment.assert_called_once()
+            
+            # Verify transcribe_to_srt.extract_mp3_from_mp4 NOT called (default no audio)
+            mock_transcribe.extract_mp3_from_mp4.assert_not_called()
 
     @patch('main_video_editor.check_srt_alignment')
     @patch('main_video_editor.transcribe_to_srt')
@@ -158,6 +163,7 @@ class TestMainVideoEditor(unittest.TestCase):
             "video.mp4", # File path
             "1",         # Mode 1 (Full)
             "My Topic",  # Topic
+            "y",         # Audio option (yes)
             "small",     # Model (small)
             "ru",        # Language (Russian)
         ]
@@ -184,7 +190,8 @@ class TestMainVideoEditor(unittest.TestCase):
                 model="small",          # SPECIFIC verification
                 max_segment_duration=8.0,
                 use_srt=True,
-                language="ru"           # SPECIFIC verification
+                language="ru",           # SPECIFIC verification
+                webinar_topic="My Topic" # SPECIFIC verification
             )
             
             # Verify correct_srt_errors called with correct topic

@@ -67,6 +67,38 @@ class TestGeminiScripts(unittest.TestCase):
 
     @patch("common_utils.get_api_key", return_value="fake_key")
     @patch("os.path.exists", return_value=True)
+    def test_audio_cleaner_process_with_audio(self, mock_exists, mock_get_key):
+        # Mock client instance
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        
+        # Mock upload
+        mock_file = MagicMock()
+        mock_file.uri = "http://fake/uri"
+        mock_file.name = "files/123"
+        mock_file.state.name = "ACTIVE"
+        mock_client.files.upload.return_value = mock_file
+        mock_client.files.get.return_value = mock_file
+        
+        # Mock generate_content
+        mock_response = MagicMock()
+        mock_response.text = '{"ranges_to_delete": []}'
+        mock_response.usage_metadata.prompt_token_count = 100
+        mock_response.usage_metadata.candidates_token_count = 50
+        mock_client.models.generate_content.return_value = mock_response
+        
+        # Run
+        with patch("builtins.open", mock_open()) as m_open:
+            output = process_srt_file("test.srt", audio_path="test.mp3")
+            
+            # Verify upload called twice (srt + audio)
+            self.assertEqual(mock_client.files.upload.call_count, 2)
+            mock_client.models.generate_content.assert_called()
+            m_open.assert_called() 
+            self.assertIn("gemini_response.txt", output)
+
+    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("os.path.exists", return_value=True)
     @patch("os.remove")
     def test_correct_transcription_process(self, mock_remove, mock_exists, mock_get_key):
          # Mock client instance

@@ -212,7 +212,7 @@ def get_segments_from_file(model, audio_path, max_dur, language=None, initial_pr
     detected_lang = result.get("language")
     return process_segments(raw_segments, max_dur), detected_lang
 
-def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI."):
+def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI.", webinar_topic=None):
     """
     Transcribe audio files to SRT format using Whisper.
     
@@ -224,6 +224,7 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         use_srt (bool, optional): Whether to output SRT format. If False, outputs plain text. Default: True
         language (str, optional): Language code (e.g., 'en', 'ru'). If None, will auto-detect. Default: None
         initial_prompt (str, optional): Prompt to guide transcription.
+        webinar_topic (str, optional): Topic of the webinar to enrich the initial prompt.
     
     Returns:
         str: Path to the created SRT/text file, or None if no files were processed.
@@ -240,10 +241,13 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
                             help="Optional: re-chunk long segments to this maximum duration (seconds)")
         parser.add_argument("--initial_prompt", type=str, default="Это запись технического вебинара или видео про программирование и AI.", 
                             help="Optional: provide a prompt to guide the transcription and reduce hallucinations.")
+        parser.add_argument("--webinar_topic", type=str, default=None,
+                            help="Optional: provide a topic for the webinar to guide transcription.")
         args = parser.parse_args()
         model = args.model
         max_segment_duration = args.max_segment_duration
         initial_prompt = args.initial_prompt
+        webinar_topic = args.webinar_topic
         
         print(f"Current working directory: {os.getcwd()}")
         folder_input = input("Which folder to process? (Press Enter for single file): ").strip()
@@ -254,18 +258,11 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         srt_input = input("convert to srt? (y/n): ").strip().lower()
         use_srt = (srt_input != 'n')
 
-    print(f"Whisper package version: {whisper.__version__}")
-    print(f"Loading Whisper model '{model}' (this may take a while)...")
-    start_time = time.time()
-    whisper_model = whisper.load_model(model)
-    model_load_time = time.time() - start_time
-    mins, secs = divmod(model_load_time, 60)
-    print(f"Model loaded in {int(mins):02d}:{secs:05.2f}")
-
     # Normalize empty strings to None
     folder_input = folder_input if folder_input else None
     file_input = file_input if file_input else None
 
+    # 1. Identify files to process first
     files_to_process = []
 
     if folder_input:
@@ -295,6 +292,52 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
     print(f"Found {len(files_to_process)} files to process:")
     for f in files_to_process:
         print(f" - {f}")
+
+    # 2. Determine output filename early
+    if folder_input and os.path.isdir(folder_input):
+        # Folder mode -> Single file named after folder
+        folder_name = os.path.basename(os.path.abspath(folder_input))
+        out_name = folder_name
+        if not out_name: out_name = "output"
+    elif files_to_process:
+        # Single file mode
+        input_path = os.path.abspath(files_to_process[0])
+        input_dir = os.path.dirname(input_path)
+        filename = os.path.basename(input_path)
+        base_name = os.path.splitext(filename)[0]
+        out_name = os.path.join(input_dir, base_name)
+    else:
+        return None
+
+    ext = ".srt" if use_srt else ".txt"
+    outpath = out_name + ext
+
+    # 3. Check if output file already exists
+    if os.path.exists(outpath):
+        print(f"\nOutput file already exists: {outpath}")
+        regenerate = input("Regenerate it? (y/n): ").strip().lower()
+        if regenerate != 'y':
+            print(f"Using existing file: {outpath}")
+            # If language was not provided, ask for it since we rely on it later
+            if language is None:
+                print(get_language_codes_help())
+                lang_input = input("Enter language of existing file (press Enter for 'en'): ").strip()
+                language = lang_input.lower() if lang_input else 'en'
+            return outpath, language
+
+    # 4. Load Model (only if needed)
+    print(f"Whisper package version: {whisper.__version__}")
+    print(f"Loading Whisper model '{model}' (this may take a while)...")
+    start_time = time.time()
+    whisper_model = whisper.load_model(model)
+    model_load_time = time.time() - start_time
+    mins, secs = divmod(model_load_time, 60)
+    print(f"Model loaded in {int(mins):02d}:{secs:05.2f}")
+
+    # Enriched initial prompt (moved here, logic remains same)
+    if webinar_topic:
+        initial_prompt = f"{initial_prompt} Topic: {webinar_topic}"
+        print(f"Enriched initial prompt with topic: {webinar_topic}")
 
     # Track files we extract for language detection so we can reuse them
     reused_extracted_files = {}  # Maps original file path to extracted MP3 path
@@ -415,26 +458,6 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         except Exception as e:
             print(f"Warning: Could not remove temporary file {temp_file}: {e}")
 
-    # Determine output filename
-    if folder_input and os.path.isdir(folder_input):
-        # Folder mode -> Single file named after folder
-        folder_name = os.path.basename(os.path.abspath(folder_input))
-        out_name = folder_name
-        if not out_name: out_name = "output"
-    elif files_to_process:
-        # Single file mode
-        # Single file mode
-        input_path = os.path.abspath(files_to_process[0])
-        input_dir = os.path.dirname(input_path)
-        filename = os.path.basename(input_path)
-        base_name = os.path.splitext(filename)[0]
-        out_name = os.path.join(input_dir, base_name)
-    else:
-        return None
-
-    ext = ".srt" if use_srt else ".txt"
-    outpath = out_name + ext
-    
     # Generate content
     if use_srt:
         content = segments_to_srt(all_segments)

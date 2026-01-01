@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost, format_ms_to_srt
 
 load_dotenv()
+correct_srt_errors_model = "gemini-3-flash-preview"
 
 # Check if google.genai is available
 try:
@@ -169,11 +170,11 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
         """
 
         # Call Gemini
-        print("  Requesting correction from Gemini (model: gemini-2.5-flash)...")
+        print(f"  Requesting correction from Gemini (model: {correct_srt_errors_model})...")
         response = None
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=correct_srt_errors_model,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.1,

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt
 
 load_dotenv()
-
+generate_chapters_model = "gemini-3-flash-preview"
 # Check if google.genai is available
 try:
     import google.genai as genai
@@ -105,10 +105,10 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     """
     
     # Step 5: Call Gemini 3 with uploaded file
-    print("Step 5: Requesting chapters from Gemini 3 Flash model...")
+    print(f"Step 5: Requesting chapters from {generate_chapters_model} model...")
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model=generate_chapters_model,
             contents=[
                 types.Part.from_uri(
                     file_uri=uploaded_file.uri,
