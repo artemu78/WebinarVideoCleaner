@@ -13,6 +13,7 @@ import transcribe_to_srt
 
 class TestTranscribeToSrtInteractive(unittest.TestCase):
     
+    @patch('transcribe_to_srt.has_audio_stream')
     @patch('transcribe_to_srt.detect_language')
     @patch('transcribe_to_srt.whisper.load_model')
     @patch('transcribe_to_srt.extract_mp3_from_mp4')
@@ -21,12 +22,13 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
     @patch('os.path.isdir')
     @patch('os.walk')
     @patch('sys.argv', ["transcribe_to_srt.py"]) # Patch argv to avoid argparse error
-    def test_existing_srt_use_existing_no_language(self, mock_walk, mock_isdir, mock_exists, mock_input, mock_extract, mock_load, mock_detect):
+    def test_existing_srt_use_existing_no_language(self, mock_walk, mock_isdir, mock_exists, mock_input, mock_extract, mock_load, mock_detect, mock_has_audio):
         # Scenario: File exists, User says 'n' (don't regenerate), No language provided in args.
         # User should be prompted for language.
         
         # Mocks
         mock_isdir.return_value = False # Not a folder
+        mock_has_audio.return_value = True
         
         # We need careful handling of exists() since it's used for input checks AND output check
         # 1. check file_input exists -> True
@@ -46,13 +48,13 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
         
         # Verify
         self.assertEqual(language, "ru")
-        # Output path depends on logic: video.mp4 -> video.srt (absolute path handling mocked largely)
-        # We expect it to end with .srt
+        # Output path depends on logic: video.mp4 -> video.srt
         self.assertTrue(outpath.endswith(".srt"))
         
         # Verify model NOT loaded
         mock_load.assert_not_called()
         
+    @patch('transcribe_to_srt.has_audio_stream')
     @patch('transcribe_to_srt.detect_language')
     @patch('transcribe_to_srt.whisper.load_model')
     @patch('transcribe_to_srt.extract_mp3_from_mp4')
@@ -60,19 +62,16 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
     @patch('os.path.exists')
     @patch('os.path.isdir')
     @patch('os.walk')
-    def test_existing_srt_use_existing_with_language(self, mock_walk, mock_isdir, mock_exists, mock_input, mock_extract, mock_load, mock_detect):
+    def test_existing_srt_use_existing_with_language(self, mock_walk, mock_isdir, mock_exists, mock_input, mock_extract, mock_load, mock_detect, mock_has_audio):
         # Scenario: File exists, User says 'n', Language provided in args.
         # No extra prompt for language.
         
         mock_isdir.return_value = False
         mock_exists.return_value = True
+        mock_has_audio.return_value = True
         
         # Inputs:
-        # No interactive inputs for file/folder if provided in args
-        # But we DO get prompt for regenerate ("n")
-        # mock_input.side_effect = ["n"] 
-        # Wait, if we pass args to main(), interactive prompts for file/folder are skipped.
-        # But "Regenerate?" prompt is inside the logic, using input().
+        # "Regenerate?" prompt uses input().
         mock_input.side_effect = ["n"]
         
         outpath, language = transcribe_to_srt.main(file_input="video.mp4", language="es")
@@ -80,6 +79,7 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
         self.assertEqual(language, "es")
         mock_load.assert_not_called()
         
+    @patch('transcribe_to_srt.has_audio_stream')
     @patch('transcribe_to_srt.detect_language')
     @patch('transcribe_to_srt.whisper.load_model')
     @patch('transcribe_to_srt.extract_mp3_from_mp4')
@@ -88,14 +88,13 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
     @patch('builtins.input')
     @patch('os.path.exists')
     @patch('os.path.isdir')
-    def test_existing_srt_regenerate(self, mock_isdir, mock_exists, mock_input, mock_open, mock_segs, mock_extract, mock_load, mock_detect):
+    def test_existing_srt_regenerate(self, mock_isdir, mock_exists, mock_input, mock_open, mock_segs, mock_extract, mock_load, mock_detect, mock_has_audio):
         # Scenario: File exists, User says 'y' (regenerate).
         # Should load model and proceed.
         
         mock_isdir.return_value = False
-        # 1. file_input exists -> True
-        # 2. outpath exists -> True
         mock_exists.return_value = True
+        mock_has_audio.return_value = True
         
         # Inputs for regenerate prompt
         mock_input.side_effect = ["y"]

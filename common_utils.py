@@ -132,3 +132,48 @@ def get_total_gemini_cost():
     """Returns the total accumulated Gemini cost."""
     global _TOTAL_GEMINI_COST
     return _TOTAL_GEMINI_COST
+
+# Try to import google.genai for safe_upload typing/config
+try:
+    from google.genai import types
+except ImportError:
+    types = None
+
+import shutil
+import tempfile
+
+def safe_upload(client, file_path, mime_type):
+    """
+    Uploads a file to Gemini using a safe temporary ASCII filename to avoid Unicode errors.
+    
+    Args:
+        client: The initialized Gemini client.
+        file_path (str): The absolute path to the file to upload.
+        mime_type (str): The MIME type of the file.
+        
+    Returns:
+        The uploaded file object from Gemini.
+    """
+    if types is None:
+        raise ImportError("google.genai package is required for safe_upload")
+
+    ext = os.path.splitext(file_path)[1]
+    # Create a temp file with the same extension
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix="gemini_upload_") as tmp:
+        temp_path = tmp.name
+    
+    try:
+        # Copy original file content to temp file
+        shutil.copy2(file_path, temp_path)
+        
+        # Upload the temp file
+        print(f"  (Uploading safe copy: {temp_path})...")
+        uploaded_file = client.files.upload(
+            file=temp_path,
+            config=types.UploadFileConfig(mime_type=mime_type)
+        )
+        return uploaded_file
+    finally:
+        # cleanup temp file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)

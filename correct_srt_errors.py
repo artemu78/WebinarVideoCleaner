@@ -4,7 +4,7 @@ import time
 import json
 import re
 from dotenv import load_dotenv
-from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost, format_ms_to_srt
+from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost, format_ms_to_srt, safe_upload
 
 load_dotenv()
 correct_srt_errors_model = "gemini-3-flash-preview"
@@ -101,7 +101,7 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
     total_input_tokens = 0
     total_output_tokens = 0
     
-    temp_json_path = srt_path + ".temp_batch.json"
+    import tempfile
 
     for i, batch in enumerate(batches):
         print(f"\nProcessing Batch {i+1}/{len(batches)} ({len(batch)} items)...")
@@ -112,20 +112,20 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
             for b in batch
         ]
         
-        # Save batch to temp file
-        with open(temp_json_path, "w", encoding="utf-8") as f:
-            json.dump(input_payload, f, indent=2, ensure_ascii=False)
+        # Save batch to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_file:
+            json.dump(input_payload, tmp_file, indent=2, ensure_ascii=False)
+            temp_json_path = tmp_file.name
 
         # Upload batch
         uploaded_file = None
         try:
-            print("  Uploading batch...")
-            uploaded_file = client.files.upload(
-                file=temp_json_path,
-                config=types.UploadFileConfig(mime_type="text/plain")
-            )
+            print(f"  Uploading batch (using safe_upload)...")
+            uploaded_file = safe_upload(client, temp_json_path, "application/json")
         except Exception as e:
             print(f"  ❌ Error uploading batch {i+1}: {e}")
+            if os.path.exists(temp_json_path):
+                os.remove(temp_json_path)
             continue
 
         # Wait for processing
@@ -138,11 +138,15 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
                 print(f"  ❌ Batch {i+1} processing failed.")
                 try: client.files.delete(name=uploaded_file.name)
                 except: pass
+                if os.path.exists(temp_json_path):
+                    os.remove(temp_json_path)
                 continue
         except Exception as e:
             print(f"  ❌ Error checking status for batch {i+1}: {e}")
             try: client.files.delete(name=uploaded_file.name)
             except: pass
+            if os.path.exists(temp_json_path):
+                os.remove(temp_json_path)
             continue
 
         # Define Prompt
@@ -210,10 +214,9 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
             if uploaded_file:
                 try: client.files.delete(name=uploaded_file.name)
                 except: pass
-
-    # Cleanup temp file
-    if os.path.exists(temp_json_path):
-        os.remove(temp_json_path)
+            
+            if os.path.exists(temp_json_path):
+                os.remove(temp_json_path)
 
     print(f"\nTotal Session Cost: ${total_cost:.6f}")
 

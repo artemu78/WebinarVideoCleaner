@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost
+from common_utils import get_api_key, calculate_gemini_cost, safe_upload
 
 load_dotenv()
 audio_cleaner_model = "gemini-3-flash-preview"
@@ -38,10 +38,7 @@ def process_srt_file(srt_path, audio_path=None):
         return
     
     try:
-        uploaded_srt = client.files.upload(
-            file=srt_path,
-            config=types.UploadFileConfig(mime_type="text/plain")
-        )
+        uploaded_srt = safe_upload(client, srt_path, "text/plain")
         print(f"✓ SRT file uploaded successfully. File URI: {uploaded_srt.uri}")
     except ClientError as e:
         error_message = str(e)
@@ -78,10 +75,7 @@ def process_srt_file(srt_path, audio_path=None):
                     mime_type = "audio/aac"
                 # Add more if needed or rely on default
 
-                uploaded_audio = client.files.upload(
-                    file=audio_path,
-                    config=types.UploadFileConfig(mime_type=mime_type)
-                )
+                uploaded_audio = safe_upload(client, audio_path, mime_type)
                 print(f"✓ Audio file uploaded successfully. File URI: {uploaded_audio.uri}")
             except Exception as e:
                 print(f"\n❌ Error uploading Audio file: {e}. Proceeding with SRT only.")

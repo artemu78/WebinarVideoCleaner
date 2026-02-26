@@ -17,6 +17,31 @@ def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', s)]
 
+def has_audio_stream(file_path):
+    """
+    Checks if the media file has an audio stream using ffprobe.
+    """
+    try:
+        command = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "a",
+            "-show_entries", "stream=index",
+            "-of", "csv=p=0",
+            file_path
+        ]
+        # Check if ffprobe is available/working by catching FileNotFoundError
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            # If ffprobe fails (e.g. invalid file), assume no audio or let downstream fail
+            return False
+            
+        # If output is non-empty, we have audio streams
+        return bool(result.stdout.strip())
+    except Exception:
+        # Fallback if something goes wrong with the check
+        return False
+
 try:
     import whisper
 except Exception as e:
@@ -277,17 +302,31 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
              files_to_process.append(folder_input)
         else:
             print(f"Path not found: {folder_input}")
-            return None
+            return None, None
     elif file_input:
         if os.path.exists(file_input):
             files_to_process.append(file_input)
         else:
             print(f"File not found: {file_input}")
-            return None
+            return None, None
 
     if not files_to_process:
         print("No files to process.")
-        return None
+        return None, None
+
+    # Filter out files without audio
+    valid_files = []
+    for f in files_to_process:
+        if has_audio_stream(f):
+            valid_files.append(f)
+        else:
+            print(f"Warning: No audio stream found in '{f}'. Skipping.")
+    
+    files_to_process = valid_files
+
+    if not files_to_process:
+        print("No files with audio content found to process.")
+        return None, None
 
     print(f"Found {len(files_to_process)} files to process:")
     for f in files_to_process:
@@ -307,23 +346,27 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         base_name = os.path.splitext(filename)[0]
         out_name = os.path.join(input_dir, base_name)
     else:
-        return None
+        return None, None
 
     ext = ".srt" if use_srt else ".txt"
     outpath = out_name + ext
 
     # 3. Check if output file already exists
+    # 3. Check if output file already exists
     if os.path.exists(outpath):
         print(f"\nOutput file already exists: {outpath}")
-        regenerate = input("Regenerate it? (y/n): ").strip().lower()
-        if regenerate != 'y':
-            print(f"Using existing file: {outpath}")
+        reproduce = input("Regenerate it? (y/n): ").strip().lower()
+        if reproduce != 'y':
+            print("Skipping generation and using existing file.")
+            
             # If language was not provided, ask for it since we rely on it later
             if language is None:
                 print(get_language_codes_help())
                 lang_input = input("Enter language of existing file (press Enter for 'en'): ").strip()
                 language = lang_input.lower() if lang_input else 'en'
             return outpath, language
+        else:
+            print("Regenerating...")
 
     # 4. Load Model (only if needed)
     print(f"Whisper package version: {whisper.__version__}")

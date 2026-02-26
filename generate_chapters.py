@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt
+from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload
 
 load_dotenv()
 generate_chapters_model = "gemini-3-flash-preview"
@@ -38,10 +38,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
         return None
     
     try:
-        uploaded_file = client.files.upload(
-            file=srt_path,
-            config=types.UploadFileConfig(mime_type="text/plain")
-        )
+        uploaded_file = safe_upload(client, srt_path, "text/plain")
         print(f"✓ File uploaded successfully. File URI: {uploaded_file.uri}")
     except ClientError as e:
         error_message = str(e)

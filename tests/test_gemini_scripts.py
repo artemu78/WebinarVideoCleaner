@@ -32,6 +32,11 @@ class TestGeminiScripts(unittest.TestCase):
     def setUp(self):
         # Reset mocks between tests
         mock_genai.reset_mock()
+        self.patcher_copy = patch("shutil.copy2")
+        self.mock_copy = self.patcher_copy.start()
+        
+    def tearDown(self):
+        self.patcher_copy.stop()
         
     @patch("common_utils.get_api_key", return_value="fake_key")
     @patch("os.path.exists", return_value=True)
