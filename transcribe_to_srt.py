@@ -113,16 +113,21 @@ def process_segments(raw_segments, max_dur):
                     segments.append({'start': cstart, 'end': cend, 'text': " ".join(chunk_words)})
     return segments
 
+def get_extracted_mp3_path(mp4_path):
+    """
+    Returns the expected path for the extracted MP3 file.
+    """
+    mp4_dir = os.path.dirname(os.path.abspath(mp4_path))
+    mp4_basename = os.path.splitext(os.path.basename(mp4_path))[0]
+    return os.path.join(mp4_dir, f"{mp4_basename}_extracted.mp3")
+
 def extract_mp3_from_mp4(mp4_path):
     """
     Extract MP3 audio track from MP4 file using ffmpeg.
     Returns path to the extracted MP3 file.
     """
     
-    # Create a temporary MP3 file in the same directory as the MP4
-    mp4_dir = os.path.dirname(os.path.abspath(mp4_path))
-    mp4_basename = os.path.splitext(os.path.basename(mp4_path))[0]
-    mp3_path = os.path.join(mp4_dir, f"{mp4_basename}_extracted.mp3")
+    mp3_path = get_extracted_mp3_path(mp4_path)
 
     if os.path.exists(mp3_path):
         print(f"Extracted audio file already exists: {mp3_path}")
@@ -392,7 +397,12 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
             # Extract MP3 if needed for language detection
             temp_file_for_detection = None
             if first_file.lower().endswith('.mp4'):
-                temp_file_for_detection = extract_mp3_from_mp4(first_file)
+                mp3_path = get_extracted_mp3_path(first_file)
+                if os.path.exists(mp3_path):
+                    print(f"Using existing audio for language detection: {mp3_path}")
+                    temp_file_for_detection = mp3_path
+                else:
+                    temp_file_for_detection = extract_mp3_from_mp4(first_file)
                 detection_path = temp_file_for_detection
             else:
                 detection_path = first_file
@@ -426,19 +436,27 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
                     language = None
                     print("Will auto-detect language for each file")
             finally:
-                # Clean up temporary file used for detection (interactive mode doesn't reuse)
+                # Cleanup disabled to allow reuse
+                pass
+                """
                 if temp_file_for_detection and os.path.exists(temp_file_for_detection):
                     try:
                         os.remove(temp_file_for_detection)
                     except:
                         pass
+                """
     elif language is None and files_to_process:
         # Auto-detect language in non-interactive mode
         # We'll extract MP3 here and reuse it for transcription to avoid double extraction
         first_file = files_to_process[0]
         temp_file_for_detection = None
         if first_file.lower().endswith('.mp4'):
-            temp_file_for_detection = extract_mp3_from_mp4(first_file)
+            mp3_path = get_extracted_mp3_path(first_file)
+            if os.path.exists(mp3_path):
+                print(f"Using existing audio for language detection: {mp3_path}")
+                temp_file_for_detection = mp3_path
+            else:
+                temp_file_for_detection = extract_mp3_from_mp4(first_file)
             detection_path = temp_file_for_detection
             # Store it for reuse in the transcription loop
             reused_extracted_files[first_file] = temp_file_for_detection
@@ -483,8 +501,14 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
                 extracted_mp3 = reused_extracted_files[audio_path]
                 print(f"Reusing previously extracted audio: {extracted_mp3}")
             else:
-                extracted_mp3 = extract_mp3_from_mp4(audio_path)
-            temp_files.append(extracted_mp3)
+                mp3_path = get_extracted_mp3_path(audio_path)
+                if os.path.exists(mp3_path):
+                    print(f"Using existing audio: {mp3_path}")
+                    extracted_mp3 = mp3_path
+                else:
+                    extracted_mp3 = extract_mp3_from_mp4(audio_path)
+            # We don't add to temp_files anymore because we want to keep extracted files to save time in future runs
+            # temp_files.append(extracted_mp3)
             audio_path = extracted_mp3
         
         segs, detected_file_lang = get_segments_from_file(whisper_model, audio_path, max_segment_duration, language=language, initial_prompt=initial_prompt)
@@ -492,7 +516,8 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         if language is None and detected_file_lang:
             language = detected_file_lang
     
-    # Clean up temporary MP3 files
+    # Temporary files cleanup is disabled to allow reuse in future runs (save time)
+    """
     for temp_file in temp_files:
         try:
             if os.path.exists(temp_file):
@@ -500,6 +525,7 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
                 print(f"Cleaned up temporary file: {temp_file}")
         except Exception as e:
             print(f"Warning: Could not remove temporary file {temp_file}: {e}")
+    """
 
     # Generate content
     if use_srt:
