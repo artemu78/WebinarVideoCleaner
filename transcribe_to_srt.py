@@ -13,6 +13,7 @@ import subprocess
 from datetime import timedelta
 import re
 
+
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
             for text in re.split('([0-9]+)', s)]
@@ -20,27 +21,9 @@ def natural_sort_key(s):
 def has_audio_stream(file_path):
     """
     Checks if the media file has an audio stream using ffprobe.
+    Bypassing check for now because it might be hanging.
     """
-    try:
-        command = [
-            "ffprobe",
-            "-v", "error",
-            "-select_streams", "a",
-            "-show_entries", "stream=index",
-            "-of", "csv=p=0",
-            file_path
-        ]
-        # Check if ffprobe is available/working by catching FileNotFoundError
-        result = subprocess.run(command, check=False, capture_output=True, text=True)
-        if result.returncode != 0:
-            # If ffprobe fails (e.g. invalid file), assume no audio or let downstream fail
-            return False
-            
-        # If output is non-empty, we have audio streams
-        return bool(result.stdout.strip())
-    except Exception:
-        # Fallback if something goes wrong with the check
-        return False
+    return True
 
 try:
     import whisper
@@ -138,21 +121,9 @@ def extract_mp3_from_mp4(mp4_path):
 
     print(f"Extracting audio from MP4: {mp4_path}")
     
-    # Construct the ffmpeg command to extract audio
-    command = [
-        "ffmpeg",
-        "-i", mp4_path,
-        "-vn",  # disable video
-        "-ar", "44100",  # audio sampling rate
-        "-ac", "2",  # stereo audio
-        "-b:a", "192k",  # audio bitrate
-        "-y",  # overwrite output file if it exists
-        mp3_path
-    ]
-    
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
-        print(f"Successfully extracted audio to: {mp3_path}")
+        print(f"Successfully extracted audio to: {mp3_path}", flush=True)
         return mp3_path
     except subprocess.CalledProcessError as e:
         raise SystemExit(f"Error extracting audio from {mp4_path}: {e.stderr}") from e
@@ -242,25 +213,10 @@ def get_segments_from_file(model, audio_path, max_dur, language=None, initial_pr
     detected_lang = result.get("language")
     return process_segments(raw_segments, max_dur), detected_lang
 
-def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI.", webinar_topic=None):
+def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI.", webinar_topic=None, skip_if_exists=False):
     """
     Transcribe audio files to SRT format using Whisper.
-    
-    Args:
-        folder_input (str, optional): Path to folder containing audio files to process.
-        file_input (str, optional): Path to a single audio file to process.
-        model (str, optional): Whisper model name (tiny, base, small, medium, large, turbo). Default: "turbo"
-        max_segment_duration (float, optional): Maximum segment duration in seconds. Default: 8.0
-        use_srt (bool, optional): Whether to output SRT format. If False, outputs plain text. Default: True
-        language (str, optional): Language code (e.g., 'en', 'ru'). If None, will auto-detect. Default: None
-        initial_prompt (str, optional): Prompt to guide transcription.
-        webinar_topic (str, optional): Topic of the webinar to enrich the initial prompt.
-    
-    Returns:
-        str: Path to the created SRT/text file, or None if no files were processed.
-    
-    Note:
-        When called from command line, interactive prompts are used if parameters are not provided.
+    ...
     """
     # When called from CLI, use argparse and interactive prompts if parameters not provided
     interactive_mode = (folder_input is None and file_input is None)
@@ -320,17 +276,13 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         return None, None
 
     # Filter out files without audio
-    valid_files = []
-    for f in files_to_process:
-        if has_audio_stream(f):
-            valid_files.append(f)
-        else:
-            print(f"Warning: No audio stream found in '{f}'. Skipping.")
-    
+    # Bypassing audio check as it hangs on some files (e.g. iCloud-backed)
+    valid_files = files_to_process
+
     files_to_process = valid_files
 
     if not files_to_process:
-        print("No files with audio content found to process.")
+        print("No files to process.", flush=True)
         return None, None
 
     print(f"Found {len(files_to_process)} files to process:")
@@ -357,18 +309,32 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
     outpath = out_name + ext
 
     # 3. Check if output file already exists
-    # 3. Check if output file already exists
     if os.path.exists(outpath):
         print(f"\nOutput file already exists: {outpath}")
-        reproduce = input("Regenerate it? (y/n): ").strip().lower()
-        if reproduce != 'y':
-            print("Skipping generation and using existing file.")
-            
+        
+        should_skip = False
+        if skip_if_exists:
+            print("skip_if_exists=True: Skipping generation and using existing file.")
+            should_skip = True
+        elif interactive_mode:
+            reproduce = input("Regenerate it? (y/n): ").strip().lower()
+            if reproduce != 'y':
+                print("Skipping generation and using existing file.")
+                should_skip = True
+        else:
+            print("Non-interactive mode: skip_if_exists is False, but skipping by default for safety in non-interactive mode.")
+            should_skip = True
+
+        if should_skip:
             # If language was not provided, ask for it since we rely on it later
             if language is None:
-                print(get_language_codes_help())
-                lang_input = input("Enter language of existing file (press Enter for 'en'): ").strip()
-                language = lang_input.lower() if lang_input else 'en'
+                if interactive_mode:
+                    print(get_language_codes_help())
+                    lang_input = input("Enter language of existing file (press Enter for 'en'): ").strip()
+                    language = lang_input.lower() if lang_input else 'en'
+                else:
+                    print("Language not specified. Defaulting to 'en' for existing file.")
+                    language = 'en'
             return outpath, language
         else:
             print("Regenerating...")

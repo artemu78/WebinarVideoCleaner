@@ -142,6 +142,12 @@ def save_srt(subs, output_path):
         f.write('\n'.join(lines))
 
 def main(srt_path, cuts_json_path):
+    # Determine output path early
+    output_path = os.path.splitext(srt_path)[0] + "_corrected.srt"
+    if os.path.exists(output_path):
+        print(f"✓ Corrected SRT already exists: {output_path} (Skipping step)")
+        return output_path
+
     print(f"Applying cuts to SRT: {srt_path}")
     print(f"Using cuts from: {cuts_json_path}")
     

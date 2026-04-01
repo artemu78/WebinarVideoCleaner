@@ -109,6 +109,10 @@ def process_video(video_path, json_path=None, start=None, end=None, mode='remove
         
     output_path = os.path.join(video_dir, f"{action_tag}_{video_name}{video_ext}")
 
+    if os.path.exists(output_path):
+        print(f"✓ Output video already exists: {output_path} (Skipping step)")
+        return output_path
+
     print(f"Processing: {video_path}")
     print(f"Mode: {mode.upper()}")
     

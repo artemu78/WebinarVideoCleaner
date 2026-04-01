@@ -25,6 +25,12 @@ except ImportError as e:
 def generate_chapters(srt_path, language=None, webinar_topic=None):
     """Upload SRT file to Gemini and get chapters/timecodes."""
     
+    # Determine output path early to check if it already exists
+    output_filename = os.path.splitext(srt_path)[0] + "_chapters.txt"
+    if os.path.exists(output_filename):
+        print(f"✓ Chapters already exist: {output_filename} (Skipping step)")
+        return output_filename
+
     # Step 1: Initialize Client
     print("Step 1: Initializing Gemini client...")
     api_key = get_api_key()

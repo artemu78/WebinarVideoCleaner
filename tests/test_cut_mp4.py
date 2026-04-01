@@ -31,8 +31,12 @@ class TestCutMp4Utils(unittest.TestCase):
     @patch("cut_mp4.concatenate_videoclips")
     @patch("os.path.exists")
     def test_process_video_remove(self, mock_exists, mock_concat, mock_videoclip):
-        # Setup mocks
-        mock_exists.return_value = True
+        # Setup mocks: return True for input file, False for output file
+        def exists_side_effect(path):
+            if "cleaned" in path or "trimmed" in path:
+                return False
+            return True
+        mock_exists.side_effect = exists_side_effect
         
         mock_video_instance = MagicMock()
         mock_video_instance.duration = 100
@@ -73,8 +77,12 @@ class TestCutMp4Utils(unittest.TestCase):
     @patch("cut_mp4.concatenate_videoclips")
     @patch("os.path.exists")
     def test_process_video_keep(self, mock_exists, mock_concat, mock_videoclip):
-        # Setup mocks
-        mock_exists.return_value = True
+        # Setup mocks: return True for input file, False for output file
+        def exists_side_effect(path):
+            if "cleaned" in path or "trimmed" in path:
+                return False
+            return True
+        mock_exists.side_effect = exists_side_effect
         
         mock_video_instance = MagicMock()
         mock_video_instance.duration = 100

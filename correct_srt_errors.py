@@ -71,7 +71,14 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
     Parses SRT, extracts text, asks Gemini to correct it via JSON in batches, 
     and reconstructs the SRT with original timestamps.
     """
+    # Determine output path early to check if it already exists
+    base, ext = os.path.splitext(srt_path)
+    output_path = f"{base}_corrected_by_gemini{ext}"
     
+    if os.path.exists(output_path):
+        print(f"✓ Corrected SRT already exists: {output_path} (Skipping step)")
+        return output_path
+
     # Step 1: Initialize Client
     print(f"Initializing Gemini client for SRT correction (Language: {language})...")
     api_key = get_api_key()

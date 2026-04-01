@@ -3,7 +3,7 @@ repos:
     hooks:
     -   id: run-tests
         name: Run Unit Tests
-        entry: python3 -m unittest discover tests
+        entry: ./tests.sh
         language: system
         types: [python]
         pass_filenames: false

@@ -25,6 +25,12 @@ except ImportError as e:
 def process_srt_file(srt_path, audio_path=None):
     """Upload SRT file (and optional audio) to Gemini and get response, saving it as txt file."""
     
+    # Determine output path early to check if it already exists
+    output_filename = os.path.splitext(srt_path)[0] + "_gemini_response.txt"
+    if os.path.exists(output_filename):
+        print(f"✓ Gemini response file already exists: {output_filename} (Skipping step)")
+        return output_filename
+
     # Step 1: Initialize Client
     print("Step 1: Initializing Gemini client...")
     api_key = get_api_key()

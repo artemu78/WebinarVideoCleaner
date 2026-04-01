@@ -2,8 +2,13 @@
 """
 Main script to orchestrate MP4 video editing workflow:
 1. Transcribe MP4 to SRT
-2. Analyze SRT with Gemini to find ranges to delete
-3. Cut those ranges from the original MP4
+2. Correct Transcription Errors
+3. Analyze SRT with Gemini to find ranges to delete
+4. Cut those ranges from the original MP4
+5. Correct SRT timestamps
+6. Check SRT Alignment
+7. Generate Chapters
+8. Calculate Teacher Delivery Metrics
 """
 
 import os
@@ -23,9 +28,10 @@ try:
     import correct_srt_errors
     import common_utils
     import check_srt_alignment
+    import delivery_metrics
 except ImportError as e:
     print(f"Error: Could not import required modules: {e}")
-    print("Please ensure transcribe_to_srt.py, audio_cleaner.py, cut_mp4.py, apply_cuts_to_srt.py, generate_chapters.py, correct_srt_errors.py, and check_srt_alignment.py are in the same directory.")
+    print("Please ensure all required .py scripts are in the same directory.")
     sys.exit(1)
 
 
@@ -141,6 +147,12 @@ def convert_gemini_response_to_cut_format(gemini_response_path):
         print(f"Error: Gemini response file not found: {gemini_response_path}")
         return None
     
+    # Determine output path early
+    json_output_path = os.path.splitext(os.path.abspath(gemini_response_path))[0] + "_ranges.json"
+    if os.path.exists(json_output_path):
+        print(f"✓ Ranges JSON already exists: {json_output_path} (Skipping step)")
+        return json_output_path
+
     # Read the response text
     with open(gemini_response_path, 'r', encoding='utf-8') as f:
         response_text = f.read()
@@ -206,6 +218,7 @@ def main():
     7. Correct SRT timestamps
     8. Check SRT Alignment
     9. Generate Chapters
+    10. Calculate Delivery Metrics
     """
     start_time = time.time()
     script_start_dt = datetime.now()
@@ -239,8 +252,8 @@ def main():
         if response != 'y':
             return
     
-    print(f"\nProcessing MP4 file: {mp4_path}\n")
-
+    print(f"\nProcessing MP4 file: {mp4_path}\n", flush=True)
+    
     # Ask for mode
     print("Select Mode:")
     print("1. Full Video Cleaner (Transcribe + Cut + Chapters)")
@@ -249,9 +262,9 @@ def main():
     no_cut_mode = (mode_input == '2')
 
     if no_cut_mode:
-        print("\nMode: Transcription & Chapters Only (No Cut)")
+        print("\nMode: Transcription & Chapters Only (No Cut)", flush=True)
     else:
-        print("\nMode: Full Video Cleaner")
+        print("\nMode: Full Video Cleaner", flush=True)
 
     # Ask for Webinar Topic (Optional)
     webinar_topic = input("Enter webinar topic (optional, press Enter to skip): ").strip()
@@ -319,7 +332,8 @@ def main():
             max_segment_duration=8.0,
             use_srt=True,
             language=language,
-            webinar_topic=webinar_topic
+            webinar_topic=webinar_topic,
+            skip_if_exists=True
         )
         
         if not srt_path:
@@ -377,35 +391,27 @@ def main():
         print("STEP 3: Analyzing SRT with Gemini")
         print("=" * 60)
         try:
-            audio_path_for_analysis = None
-            if use_audio_for_analysis:
-                print("Extracting audio for analysis...")
-                try:
-                    # Reuse extract_mp3_from_mp4 from transcribe_to_srt
-                    audio_path_for_analysis = transcribe_to_srt.extract_mp3_from_mp4(mp4_path)
-                    # Get absolute path
-                    if audio_path_for_analysis:
-                        audio_path_for_analysis = os.path.abspath(audio_path_for_analysis)
-                        print(f"Audio extracted: {audio_path_for_analysis}")
-                except Exception as e:
-                    print(f"Warning: Failed to extract audio: {e}. Proceeding with SRT only.")
-                    audio_path_for_analysis = None
+            # Check if output already exists before doing any work
+            expected_response_path = os.path.splitext(srt_path)[0] + "_gemini_response.txt"
+            if os.path.exists(expected_response_path):
+                print(f"✓ Gemini response file already exists: {expected_response_path} (Skipping step)")
+                gemini_response_path = expected_response_path
+            else:
+                audio_path_for_analysis = None
+                if use_audio_for_analysis:
+                    print("Extracting audio for analysis...")
+                    try:
+                        # Reuse extract_mp3_from_mp4 from transcribe_to_srt
+                        audio_path_for_analysis = transcribe_to_srt.extract_mp3_from_mp4(mp4_path)
+                        # Get absolute path
+                        if audio_path_for_analysis:
+                            audio_path_for_analysis = os.path.abspath(audio_path_for_analysis)
+                            print(f"Audio extracted: {audio_path_for_analysis}")
+                    except Exception as e:
+                        print(f"Warning: Failed to extract audio: {e}. Proceeding with SRT only.")
+                        audio_path_for_analysis = None
 
-            gemini_response_path = audio_cleaner.process_srt_file(srt_path, audio_path=audio_path_for_analysis)
-            
-            # Clean up extracted audio if we created it specifically for this and successful
-            if audio_path_for_analysis and os.path.exists(audio_path_for_analysis):
-                try:
-                    # Ask user or just keep it? 
-                    # Usually clean up temp files. But let's keep it consistent with other usage or just clean up.
-                    # transcribe_to_srt prompts reuse, so maybe better to leave it?
-                    # The prompt says "Reuse existing audio file: ...", so leaving it is fine.
-                    # But for a cleaner workflow, if the user didn't ask to keep it...
-                    # Let's leave it for now to avoid accidental deletion of reusable assets, 
-                    # or subsequent runs might need it.
-                    pass 
-                except:
-                    pass
+                gemini_response_path = audio_cleaner.process_srt_file(srt_path, audio_path=audio_path_for_analysis)
             
             if not gemini_response_path:
                 print("Error: Gemini analysis failed or response file was not created")
@@ -579,6 +585,39 @@ def main():
     
     print(f"Step 8 duration: {time.time() - step_start_time:.2f} seconds")
 
+    # Step 9: Calculate Delivery Metrics
+    step_start_time = time.time()
+    print("=" * 60)
+    print("STEP 9: Calculating Delivery Metrics")
+    print("=" * 60)
+    metrics_path = "Skipped"
+    
+    if valid_srt_for_chapters and chapters_path and os.path.exists(chapters_path):
+        try:
+            metrics_path = delivery_metrics.generate_delivery_metrics(
+                valid_srt_for_chapters, 
+                chapters_path, 
+                language=detected_language, 
+                webinar_topic=webinar_topic
+            )
+            
+            if not metrics_path:
+                print("Warning: Delivery metrics calculation failed")
+                metrics_path = "Failed"
+            else:
+                metrics_path = os.path.abspath(metrics_path)
+                print(f"\n✓ Delivery metrics report: {metrics_path}\n")
+        except Exception as e:
+            print(f"Error during delivery metrics calculation: {e}")
+            import traceback
+            traceback.print_exc()
+            metrics_path = f"Error: {e}"
+    else:
+        print("Warning: Missing SRT or Chapters for delivery metrics calculation.")
+        metrics_path = "Missing input files"
+    
+    print(f"Step 9 duration: {time.time() - step_start_time:.2f} seconds")
+
     # Summary
     elapsed_time = time.time() - start_time
     time_str = common_utils.format_ms_to_srt(elapsed_time * 1000)
@@ -597,6 +636,7 @@ def main():
     print(f"Cleaned video:  {output_video_path}")
     print(f"Corrected SRT:  {corrected_srt_path}")
     print(f"Chapters file:  {chapters_path}")
+    print(f"Metrics file:   {metrics_path}")
     print(f"Total execution time: {time_str}")
     
     total_cost = common_utils.get_total_gemini_cost()

@@ -10,6 +10,7 @@ This project provides an automated workflow to clean and enhance webinar recordi
 - **Subtitle Correction**: Uses AI to fix transcription errors and improve subtitle quality.
 - **Subtitle Synchronization**: Adjusts SRT timestamps to perfectly match the edited (cut) video.
 - **Chapter Generation**: Generates structured chapters with titles and summaries for the final video.
+- **Teacher Delivery Metrics**: Analyzes teacher delivery including pace, student-to-teacher talk ratio, jargon density, and engagement.
 - **Cost & Time Tracking**: Monitors script execution time and estimates Gemini API costs.
 
 ## Prerequisites
@@ -52,9 +53,9 @@ The main entry point for the application is `main_video_editor.py`.
 2.  **Follow the interactive prompts**:
     - **Enter MP4 Path**: Paste the full path to your webinar video file.
     - **Select Mode**:
-        - `1`: **Full Video Cleaner** (Transcribe + Correct + Analyze + Cut + Chapters).
-        - `2`: **Transcription & Chapters Only** (Skips the video cutting step).
-    - **Webinar Topic**: (Optional) Provide a topic to help the AI understand context better during correction.
+        - `1`: **Full Video Cleaner** (Transcribe + Correct + Analyze + Cut + Chapters + Metrics).
+        - `2`: **Transcription, Chapters & Metrics Only** (Skips the video cutting step).
+    - **Webinar Topic**: (Optional) Provide a topic to help the AI understand context better during correction and metrics calculation.
 
 3.  **Review Outputs**:
     All generated files are saved in the same directory as the original video. The script provides a summary at the end containing paths to:
@@ -62,6 +63,7 @@ The main entry point for the application is `main_video_editor.py`.
     - Corrected SRT
     - Cleaned (Cut) Video
     - Chapters File
+    - **Delivery Metrics Report**
     - Usage Stats
 
 ## Workflow Details
@@ -86,6 +88,9 @@ The system operates through a cascade of specialized scripts orchestrated by `ma
 6.  **Chapters** (`generate_chapters.py`):
     Analyzes the final content to generate a list of chapters with timestamps.
 
+7.  **Delivery Metrics** (`delivery_metrics.py`):
+    Calculates key delivery and engagement metrics (WPM, dead air, jargon density, talk ratio) and provides a detailed improvement report.
+
 ## Project Structure
 
 - `main_video_editor.py`: Orchestrator script that manages the entire pipeline.
@@ -95,4 +100,5 @@ The system operates through a cascade of specialized scripts orchestrated by `ma
 - `correct_srt_errors.py`: Logic for AI-based subtitle correction.
 - `apply_cuts_to_srt.py`: Utilities for SRT timestamp manipulation.
 - `generate_chapters.py`: Generates video chapters.
+- `delivery_metrics.py`: Calculates teacher delivery metrics.
 - `common_utils.py`: Shared utilities for path handling, logging, and cost calculation.
