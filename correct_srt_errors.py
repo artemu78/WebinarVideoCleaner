@@ -4,7 +4,7 @@ import time
 import json
 import re
 from dotenv import load_dotenv
-from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost, format_ms_to_srt, safe_upload
+from common_utils import get_api_key, clean_srt_response, calculate_gemini_cost, format_ms_to_srt, safe_upload, retry_gemini_request
 
 load_dotenv()
 correct_srt_errors_model = "gemini-3-flash-preview"
@@ -84,6 +84,11 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
     api_key = get_api_key()
     client = genai.Client(api_key=api_key)
     
+    # Define wrapped methods for retries
+    retry_generate_content = retry_gemini_request(client.models.generate_content)
+    retry_get_file = retry_gemini_request(client.files.get)
+    retry_delete_file = retry_gemini_request(client.files.delete)
+    
     # Step 2: Parse SRT locally
     print(f"Parsing SRT file: {srt_path}...")
     if not os.path.exists(srt_path):
@@ -139,18 +144,18 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
         try:
             while uploaded_file.state.name == "PROCESSING":
                 time.sleep(0.5)
-                uploaded_file = client.files.get(name=uploaded_file.name)
+                uploaded_file = retry_get_file(name=uploaded_file.name)
             
             if uploaded_file.state.name == "FAILED":
                 print(f"  ❌ Batch {i+1} processing failed.")
-                try: client.files.delete(name=uploaded_file.name)
+                try: retry_delete_file(name=uploaded_file.name)
                 except: pass
                 if os.path.exists(temp_json_path):
                     os.remove(temp_json_path)
                 continue
         except Exception as e:
             print(f"  ❌ Error checking status for batch {i+1}: {e}")
-            try: client.files.delete(name=uploaded_file.name)
+            try: retry_delete_file(name=uploaded_file.name)
             except: pass
             if os.path.exists(temp_json_path):
                 os.remove(temp_json_path)
@@ -184,7 +189,7 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
         print(f"  Requesting correction from Gemini (model: {correct_srt_errors_model})...")
         response = None
         try:
-            response = client.models.generate_content(
+            response = retry_generate_content(
                 model=correct_srt_errors_model,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -219,7 +224,7 @@ def process_srt_correction(srt_path, language="en", webinar_topic=None):
         finally:
             # Cleanup
             if uploaded_file:
-                try: client.files.delete(name=uploaded_file.name)
+                try: retry_delete_file(name=uploaded_file.name)
                 except: pass
             
             if os.path.exists(temp_json_path):

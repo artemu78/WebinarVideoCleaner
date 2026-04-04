@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost, safe_upload
+from common_utils import get_api_key, calculate_gemini_cost, safe_upload, retry_gemini_request
 
 load_dotenv()
 audio_cleaner_model = "gemini-3-flash-preview"
@@ -36,6 +36,11 @@ def process_srt_file(srt_path, audio_path=None):
     api_key = get_api_key()
     client = genai.Client(api_key=api_key)
     print("✓ Client initialized successfully")
+    
+    # Define wrapped methods for retries
+    retry_generate_content = retry_gemini_request(client.models.generate_content)
+    retry_get_file = retry_gemini_request(client.files.get)
+    retry_delete_file = retry_gemini_request(client.files.delete)
     
     # Step 2: Upload SRT file
     print(f"Step 2: Uploading SRT file: {srt_path}...")
@@ -98,7 +103,7 @@ def process_srt_file(srt_path, audio_path=None):
             while f_obj.state.name == "PROCESSING":
                 print(f"  File {f_obj.name} is still processing, waiting...")
                 time.sleep(2)
-                f_obj = client.files.get(name=f_obj.name)
+                f_obj = retry_get_file(name=f_obj.name)
             
             if f_obj.state.name == "FAILED":
                 print(f"Error: File processing failed for {f_obj.name}")
@@ -162,7 +167,7 @@ def process_srt_file(srt_path, audio_path=None):
     content_parts.append(prompt)
 
     try:
-        response = client.models.generate_content(
+        response = retry_generate_content(
             model=audio_cleaner_model,
             contents=content_parts
         )
@@ -173,7 +178,9 @@ def process_srt_file(srt_path, audio_path=None):
         print(f"\n❌ Error generating content: {e}")
         # Try to clean up the uploaded file even if generation failed
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_srt.name)
+            if uploaded_audio:
+                retry_delete_file(name=uploaded_audio.name)
         except:
             pass
         return None
@@ -181,7 +188,9 @@ def process_srt_file(srt_path, audio_path=None):
         print(f"\n❌ Unexpected error generating content: {e}")
         # Try to clean up the uploaded file even if generation failed
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_srt.name)
+            if uploaded_audio:
+                retry_delete_file(name=uploaded_audio.name)
         except:
             pass
         return None
@@ -194,7 +203,9 @@ def process_srt_file(srt_path, audio_path=None):
         print("Error: Gemini response has no text content")
         # Try to clean up the uploaded file
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_srt.name)
+            if uploaded_audio:
+                retry_delete_file(name=uploaded_audio.name)
         except:
             pass
         return None
@@ -203,7 +214,9 @@ def process_srt_file(srt_path, audio_path=None):
         print("Warning: Gemini response text is empty")
         # Try to clean up the uploaded file
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_srt.name)
+            if uploaded_audio:
+                retry_delete_file(name=uploaded_audio.name)
         except:
             pass
         return None
@@ -222,7 +235,7 @@ def process_srt_file(srt_path, audio_path=None):
 
     for f_obj in files_to_delete:
         try:
-            client.files.delete(name=f_obj.name)
+            retry_delete_file(name=f_obj.name)
             print(f"✓ Uploaded file {f_obj.name} deleted from Gemini")
         except Exception as e:
             print(f"  Warning: Could not delete uploaded file {f_obj.name}: {e}")

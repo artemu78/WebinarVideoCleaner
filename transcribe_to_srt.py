@@ -121,6 +121,13 @@ def extract_mp3_from_mp4(mp4_path):
 
     print(f"Extracting audio from MP4: {mp4_path}")
     
+    # Use ffmpeg to extract audio
+    command = [
+        "ffmpeg", "-y", "-i", mp4_path,
+        "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+        mp3_path
+    ]
+    
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
         print(f"Successfully extracted audio to: {mp3_path}", flush=True)

@@ -50,7 +50,15 @@ class TestDeliveryMetrics(unittest.TestCase):
         self.assertEqual(metrics['dead_air_intervals'][0]['duration'], 4000)
 
     def test_calculate_manual_metrics_empty(self):
-        self.assertEqual(calculate_manual_metrics([]), {})
+        expected = {
+            'total_duration_ms': 0,
+            'dead_air_count': 0,
+            'total_dead_air_ms': 0,
+            'dead_air_percentage': "0.0%",
+            'average_wpm': "0.0",
+            'dead_air_intervals': []
+        }
+        self.assertEqual(calculate_manual_metrics([]), expected)
 
     def test_read_chapters(self):
         chapters_content = "00:00:00 - Intro\n00:05:00 - Deep Dive"

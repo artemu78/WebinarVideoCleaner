@@ -4,7 +4,7 @@ import time
 import json
 import re
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload, parse_time_to_ms
+from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload, parse_time_to_ms, retry_gemini_request
 
 load_dotenv()
 delivery_metrics_model = "gemini-3-flash-preview"
@@ -59,7 +59,14 @@ def calculate_manual_metrics(srt_blocks):
     - Pace (WPM)
     """
     if not srt_blocks:
-        return {}
+        return {
+            'total_duration_ms': 0,
+            'dead_air_count': 0,
+            'total_dead_air_ms': 0,
+            'dead_air_percentage': "0.0%",
+            'average_wpm': "0.0",
+            'dead_air_intervals': []
+        }
 
     total_duration_ms = srt_blocks[-1]['end'] - srt_blocks[0]['start']
     
@@ -118,6 +125,11 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
     api_key = get_api_key()
     client = genai.Client(api_key=api_key)
     
+    # Define wrapped methods for retries
+    retry_generate_content = retry_gemini_request(client.models.generate_content)
+    retry_get_file = retry_gemini_request(client.files.get)
+    retry_delete_file = retry_gemini_request(client.files.delete)
+    
     # Step 2: Manual Metrics
     srt_blocks = parse_srt_for_metrics(srt_path)
     manual_metrics = calculate_manual_metrics(srt_blocks)
@@ -129,7 +141,7 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
         uploaded_file = safe_upload(client, srt_path, "text/plain")
         while uploaded_file.state.name == "PROCESSING":
             time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
+            uploaded_file = retry_get_file(name=uploaded_file.name)
         
         if uploaded_file.state.name == "FAILED":
             print("Error: File processing failed")
@@ -196,7 +208,7 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
        Measure the latency from a student question to the teacher's response.
     
     Output Format:
-    A structured report in strict HTML format (no CSS) with the following sections:
+    Return only the HTML body content (no <html>, <head>, or <body> tags) in a structured format (no CSS) with the following sections:
     - Executive Summary (Overall grade/score)
     - Engagement Metrics (Talk Ratio, Dead Air)
     - Content & Clarity (Jargon, Cognitive Load)
@@ -209,7 +221,7 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
 
     print(f"Requesting deep analysis from Gemini (model: {delivery_metrics_model})...")
     try:
-        response = client.models.generate_content(
+        response = retry_generate_content(
             model=delivery_metrics_model,
             contents=[
                 types.Part.from_uri(
@@ -224,13 +236,28 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
         print(f"✓ Analysis complete. Cost: ${cost:.6f} | Tokens: {in_tok} in / {out_tok} out")
         
         # Step 5: Save the report
-        report_content = response.text
+        report_body = response.text
+        
+        # Clean up possible markdown code blocks if Gemini includes them
+        report_body = re.sub(r'^```html\n?', '', report_body)
+        report_body = re.sub(r'\n?```$', '', report_body)
+
+        full_html = f"""<!DOCTYPE html>
+<html lang="{language}">
+<head>
+    <meta charset="utf-8">
+    <title>Delivery Metrics - {webinar_topic or "Analysis"}</title>
+</head>
+<body style="font-family: sans-serif; line-height: 1.5; max-width: 800px; margin: 2em auto; padding: 0 1em;">
+{report_body}
+</body>
+</html>"""
         
         base_path = os.path.splitext(srt_path)[0]
         output_path = f"{base_path}_delivery_metrics.html"
         
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(report_content)
+            f.write(full_html)
             
         print(f"✓ Delivery metrics report saved to: {output_path}")
         return output_path
@@ -240,7 +267,7 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
         return None
     finally:
         if uploaded_file:
-            try: client.files.delete(name=uploaded_file.name)
+            try: retry_delete_file(name=uploaded_file.name)
             except: pass
 
 if __name__ == "__main__":

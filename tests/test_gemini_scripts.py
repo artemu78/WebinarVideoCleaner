@@ -38,7 +38,7 @@ class TestGeminiScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "gemini_response" not in p
         
         mock_client = MagicMock()
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("audio_cleaner.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -63,7 +63,7 @@ class TestGeminiScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "gemini_response" not in p
         
         mock_client = MagicMock()
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("audio_cleaner.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -87,7 +87,7 @@ class TestGeminiScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "corrected_by_gemini" not in p
         
         mock_client = MagicMock()
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("correct_srt_errors.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -111,7 +111,7 @@ class TestGeminiScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "_chapters.txt" not in p
         
         mock_client = MagicMock()
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("generate_chapters.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -130,12 +130,16 @@ class TestGeminiScripts(unittest.TestCase):
     @patch("delivery_metrics.calculate_gemini_cost")
     @patch("common_utils.safe_upload")
     @patch("os.path.exists")
-    def test_generate_delivery_metrics_process(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key, mock_common_get_key):
+    @patch("common_utils.retry_gemini_request", side_effect=lambda x: x)
+    def test_generate_delivery_metrics_process(self, mock_retry, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key, mock_common_get_key):
         import delivery_metrics
+        import importlib
+        importlib.reload(delivery_metrics)
+        
         mock_exists.side_effect = lambda p: "_delivery_metrics.html" not in p
 
         mock_client = MagicMock()
-        with patch("google.genai.Client", return_value=mock_client):
+        with patch("delivery_metrics.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file

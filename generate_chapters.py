@@ -2,7 +2,7 @@
 import os
 import time
 from dotenv import load_dotenv
-from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload
+from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload, retry_gemini_request
 
 load_dotenv()
 generate_chapters_model = "gemini-3-flash-preview"
@@ -37,6 +37,11 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     client = genai.Client(api_key=api_key)
     print("✓ Client initialized successfully")
     
+    # Define wrapped methods for retries
+    retry_generate_content = retry_gemini_request(client.models.generate_content)
+    retry_get_file = retry_gemini_request(client.files.get)
+    retry_delete_file = retry_gemini_request(client.files.delete)
+    
     # Step 2: Upload SRT file
     print(f"Step 2: Uploading SRT file: {srt_path}...")
     if not os.path.exists(srt_path):
@@ -64,7 +69,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
         while uploaded_file.state.name == "PROCESSING":
             print("  File is still processing, waiting...")
             time.sleep(2)
-            uploaded_file = client.files.get(name=uploaded_file.name)
+            uploaded_file = retry_get_file(name=uploaded_file.name)
         
         if uploaded_file.state.name == "FAILED":
             print("Error: File processing failed")
@@ -110,7 +115,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     # Step 5: Call Gemini 3 with uploaded file
     print(f"Step 5: Requesting chapters from {generate_chapters_model} model...")
     try:
-        response = client.models.generate_content(
+        response = retry_generate_content(
             model=generate_chapters_model,
             contents=[
                 types.Part.from_uri(
@@ -126,7 +131,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     except Exception as e:
         print(f"\n❌ Error generating content: {e}")
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_file.name)
         except:
             pass
         return None
@@ -137,7 +142,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     if not hasattr(response, 'text') or not response.text:
         print("Error: Gemini response has no text content")
         try:
-            client.files.delete(name=uploaded_file.name)
+            retry_delete_file(name=uploaded_file.name)
         except:
             pass
         return None
@@ -154,7 +159,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     # Step 7: Clean up uploaded file
     print("Step 7: Cleaning up uploaded file...")
     try:
-        client.files.delete(name=uploaded_file.name)
+        retry_delete_file(name=uploaded_file.name)
         print("✓ Uploaded file deleted from Gemini")
     except Exception as e:
         print(f"  Warning: Could not delete uploaded file: {e}")

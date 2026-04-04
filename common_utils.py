@@ -141,7 +141,26 @@ except ImportError:
 
 import shutil
 import tempfile
+import functools
 
+def retry_gemini_request(func):
+    """
+    Decorator that catches Gemini API errors, asks the user to check 
+    their connection, and retries the request upon confirmation.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        while True:
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(f"\n[Gemini API Error] {e}")
+                print("Connection failed. Please check your internet connection and API status.")
+                input("Press Enter to retry the request...")
+                print("Retrying...")
+    return wrapper
+
+@retry_gemini_request
 def safe_upload(client, file_path, mime_type):
     """
     Uploads a file to Gemini using a safe temporary ASCII filename to avoid Unicode errors.
