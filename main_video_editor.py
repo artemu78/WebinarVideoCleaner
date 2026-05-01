@@ -266,6 +266,17 @@ def main():
     else:
         print("\nMode: Full Video Cleaner", flush=True)
 
+    # Ask for webinar structure output in Step 8
+    print("\nSelect Outline Output:")
+    print("1. Chapters")
+    print("2. Q/A Timeline (question-answer blocks)")
+    outline_choice = input("Enter choice (1/2, default 1): ").strip()
+    outline_mode = "qa_timeline" if outline_choice == "2" else "chapters"
+    if outline_mode == "qa_timeline":
+        print("Step 8 will generate a timed Q/A timeline.")
+    else:
+        print("Step 8 will generate chapters.")
+
     # Ask for Webinar Topic (Optional)
     webinar_topic = input("Enter webinar topic (optional, press Enter to skip): ").strip()
     if not webinar_topic:
@@ -314,6 +325,13 @@ def main():
     else:
         print("Language: Auto-detect")
 
+    # Ask for Translation
+    translate_to = input("\nTranslate subtitles to another language? (e.g. en, ru, or leave empty for no): ").strip()
+    if not translate_to:
+        translate_to = None
+    else:
+        print(f"Translation language set to: {translate_to}")
+
     # Initialize variables that might be skipped
     gemini_response_path = "Skipped"
     json_ranges_path = "Skipped"
@@ -333,7 +351,8 @@ def main():
             use_srt=True,
             language=language,
             webinar_topic=webinar_topic,
-            skip_if_exists=True
+            skip_if_exists=True,
+            translate_to=translate_to
         )
         
         if not srt_path:
@@ -550,7 +569,8 @@ def main():
     # Step 8: Generate Chapters
     step_start_time = time.time()
     print("=" * 60)
-    print("STEP 8: Generating Chapters")
+    step_8_label = "Generating Q/A Timeline" if outline_mode == "qa_timeline" else "Generating Chapters"
+    print(f"STEP 8: {step_8_label}")
     print("=" * 60)
     chapters_path = "Skipped"
     
@@ -566,14 +586,22 @@ def main():
     
     if valid_srt_for_chapters:
         try:
-            chapters_path = generate_chapters.generate_chapters(valid_srt_for_chapters, language=detected_language, webinar_topic=webinar_topic)
+            chapters_path = generate_chapters.generate_chapters(
+                valid_srt_for_chapters,
+                language=detected_language,
+                webinar_topic=webinar_topic,
+                output_mode=outline_mode
+            )
             
             if not chapters_path:
                 print("Warning: Chapter generation failed")
                 chapters_path = "Failed"
             else:
                 chapters_path = os.path.abspath(chapters_path)
-                print(f"\n✓ Chapters generated: {chapters_path}\n")
+                if outline_mode == "qa_timeline":
+                    print(f"\n✓ Q/A timeline generated: {chapters_path}\n")
+                else:
+                    print(f"\n✓ Chapters generated: {chapters_path}\n")
         except Exception as e:
             print(f"Error during chapter generation: {e}")
             import traceback
@@ -635,7 +663,8 @@ def main():
     print(f"Ranges JSON:    {json_ranges_path}")
     print(f"Cleaned video:  {output_video_path}")
     print(f"Corrected SRT:  {corrected_srt_path}")
-    print(f"Chapters file:  {chapters_path}")
+    timeline_label = "Q/A file" if outline_mode == "qa_timeline" else "Chapters file"
+    print(f"{timeline_label}:  {chapters_path}")
     print(f"Metrics file:   {metrics_path}")
     print(f"Total execution time: {time_str}")
     

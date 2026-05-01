@@ -126,6 +126,29 @@ class TestGeminiScripts(unittest.TestCase):
                     self.assertIn("_chapters.txt", output)
 
     @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
+    @patch("common_utils.safe_upload")
+    @patch("os.path.exists")
+    def test_generate_qa_timeline_process(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
+        import generate_chapters
+        mock_exists.side_effect = lambda p: "_qa_timeline.txt" not in p
+
+        mock_client = MagicMock()
+        with patch("generate_chapters.genai.Client", return_value=mock_client):
+            mock_file = MagicMock()
+            mock_file.state.name = "ACTIVE"
+            mock_safe_upload.return_value = mock_file
+
+            mock_response = MagicMock()
+            mock_response.text = "[00:00:00]\nQuestion: Q\nAnswer: A\nSide topics: None"
+            mock_client.models.generate_content.return_value = mock_response
+
+            with patch("generate_chapters.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
+                with patch("builtins.open", mock_open()):
+                    output = generate_chapters.generate_chapters("test.srt", output_mode="qa_timeline")
+                    self.assertIn("_qa_timeline.txt", output)
+
+    @patch("common_utils.get_api_key", return_value="fake_key")
     @patch("delivery_metrics.get_api_key")
     @patch("delivery_metrics.calculate_gemini_cost")
     @patch("common_utils.safe_upload")

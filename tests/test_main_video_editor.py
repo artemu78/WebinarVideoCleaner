@@ -61,7 +61,8 @@ class TestMainVideoEditor(unittest.TestCase):
         from main_video_editor import main
         mock_exists.return_value = True
         
-        mock_input.side_effect = ["video.mp4", "1", "", "", "", ""]
+        # 1: video.mp4, 2: mode(1), 3: outline(1), 4: topic(""), 5: audio(""), 6: model(""), 7: lang(""), 8: translate("")
+        mock_input.side_effect = ["video.mp4", "1", "1", "", "", "", "", ""]
         
         mock_transcribe.main.return_value = (os.path.abspath("video.srt"), "en")
         mock_correct.process_srt_correction.return_value = os.path.abspath("video_corrected.srt")
@@ -87,6 +88,7 @@ class TestMainVideoEditor(unittest.TestCase):
             main()
             mock_transcribe.main.assert_called_once()
             mock_chapters.generate_chapters.assert_called_once()
+            self.assertEqual(mock_chapters.generate_chapters.call_args.kwargs.get("output_mode"), "chapters")
 
     @patch('main_video_editor.delivery_metrics')
     @patch('main_video_editor.check_srt_alignment')
@@ -111,7 +113,8 @@ class TestMainVideoEditor(unittest.TestCase):
             return True
         mock_exists.side_effect = exists_side_effect
         
-        mock_input.side_effect = ["video.mp4", "1", "Topic", "y", "small", "ru"]
+        # 1: video.mp4, 2: mode(1), 3: outline(2), 4: Topic, 5: audio(y), 6: model(small), 7: lang(ru), 8: translate("")
+        mock_input.side_effect = ["video.mp4", "1", "2", "Topic", "y", "small", "ru", ""]
         
         mock_check.check_alignment.return_value = True
         mock_transcribe.main.return_value = (os.path.abspath("video.srt"), "en")
@@ -129,6 +132,7 @@ class TestMainVideoEditor(unittest.TestCase):
             main()
             mock_transcribe.main.assert_called_once()
             mock_chapters.generate_chapters.assert_called_once()
+            self.assertEqual(mock_chapters.generate_chapters.call_args.kwargs.get("output_mode"), "qa_timeline")
 
 if __name__ == '__main__':
     unittest.main()

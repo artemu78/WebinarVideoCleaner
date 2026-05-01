@@ -13,6 +13,14 @@ import subprocess
 from datetime import timedelta
 import re
 
+# Optional Gemini imports for translation
+try:
+    import google.genai as genai
+    from google.genai import types
+    HAS_GEMINI = True
+except ImportError:
+    HAS_GEMINI = False
+
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
@@ -29,6 +37,45 @@ try:
     import whisper
 except Exception as e:
     raise SystemExit("Please install the whisper package: pip install -U openai-whisper\nAlso ensure ffmpeg is installed.") from e
+
+
+def translate_srt(srt_content, target_language, api_key=None):
+    """
+    Translates SRT content to another language using Gemini API.
+    """
+    if not HAS_GEMINI:
+        print("Error: google-genai package not found. Cannot translate.")
+        return srt_content
+
+    try:
+        from common_utils import get_api_key, clean_srt_response
+        if not api_key:
+            api_key = get_api_key()
+    except ImportError:
+        print("Error: common_utils.py not found. Please ensure it is in the same directory.")
+        return srt_content
+
+    if not api_key:
+        print("Error: Gemini API key not found. Skipping translation.")
+        return srt_content
+
+    print(f"Initializing Gemini client for translation to {target_language}...")
+    client = genai.Client(api_key=api_key)
+    
+    # We use a system instruction and a clear prompt to ensure the output is valid SRT
+    prompt = f"Translate the following SRT subtitles to {target_language}. Keep the timing and indices exactly as they are. Output ONLY the translated SRT content without any markdown formatting or extra text.\n\n{srt_content}"
+    
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash", 
+            contents=prompt
+        )
+        translated = clean_srt_response(response.text)
+        return translated
+    except Exception as e:
+        print(f"Error during translation: {e}")
+        return srt_content
+
 
 def format_timestamp(seconds: float) -> str:
     # SRT timestamp: HH:MM:SS,mmm
@@ -220,10 +267,9 @@ def get_segments_from_file(model, audio_path, max_dur, language=None, initial_pr
     detected_lang = result.get("language")
     return process_segments(raw_segments, max_dur), detected_lang
 
-def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI.", webinar_topic=None, skip_if_exists=False):
+def main(folder_input=None, file_input=None, model="turbo", max_segment_duration=8.0, use_srt=True, language=None, initial_prompt="Это запись технического вебинара или видео про программирование и AI.", webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None):
     """
     Transcribe audio files to SRT format using Whisper.
-    ...
     """
     # When called from CLI, use argparse and interactive prompts if parameters not provided
     interactive_mode = (folder_input is None and file_input is None)
@@ -236,11 +282,17 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
                             help="Optional: provide a prompt to guide the transcription and reduce hallucinations.")
         parser.add_argument("--webinar_topic", type=str, default=None,
                             help="Optional: provide a topic for the webinar to guide transcription.")
+        parser.add_argument("--translate_to", type=str, default=None,
+                            help="Optional: translate subtitles to another language (e.g., 'en', 'ru') using Gemini.")
+        parser.add_argument("--gemini_api_key", type=str, default=None,
+                            help="Optional: Gemini API key for translation.")
         args = parser.parse_args()
         model = args.model
         max_segment_duration = args.max_segment_duration
         initial_prompt = args.initial_prompt
         webinar_topic = args.webinar_topic
+        translate_to = args.translate_to
+        gemini_api_key = args.gemini_api_key
         
         print(f"Current working directory: {os.getcwd()}")
         folder_input = input("Which folder to process? (Press Enter for single file): ").strip()
@@ -250,6 +302,11 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
             
         srt_input = input("convert to srt? (y/n): ").strip().lower()
         use_srt = (srt_input != 'n')
+
+        if use_srt and not translate_to:
+            translate_input = input("Translate to another language? (e.g. en, ru, or leave empty for no): ").strip()
+            if translate_input:
+                translate_to = translate_input
 
     # Normalize empty strings to None
     folder_input = folder_input if folder_input else None
@@ -337,11 +394,11 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
             if language is None:
                 if interactive_mode:
                     print(get_language_codes_help())
-                    lang_input = input("Enter language of existing file (press Enter for 'en'): ").strip()
-                    language = lang_input.lower() if lang_input else 'en'
+                    lang_input = input("Enter language of existing file (press Enter for 'ru'): ").strip()
+                    language = lang_input.lower() if lang_input else 'ru'
                 else:
-                    print("Language not specified. Defaulting to 'en' for existing file.")
-                    language = 'en'
+                    print("Language not specified. Defaulting to 'ru' for existing file.")
+                    language = 'ru'
             return outpath, language
         else:
             print("Regenerating...")
@@ -510,6 +567,23 @@ def main(folder_input=None, file_input=None, model="turbo", max_segment_duration
         f.write(content)
     print(f"Wrote output to {outpath}")
     
+    if translate_to and use_srt:
+        print(f"\n--- Translation Step ---")
+        translated_content = translate_srt(content, translate_to, gemini_api_key)
+        
+        # New output path for translation
+        base, ext = os.path.splitext(outpath)
+        # Avoid double extension if we're already translating a translated file (unlikely but safe)
+        if base.endswith(f"_{translate_to}"):
+             translated_outpath = outpath
+        else:
+            translated_outpath = f"{base}_{translate_to}{ext}"
+        
+        with open(translated_outpath, "w", encoding="utf-8") as f:
+            f.write(translated_content)
+        print(f"Wrote translated output to {translated_outpath}")
+        return translated_outpath, translate_to
+
     return outpath, language
 
 if __name__ == "__main__":

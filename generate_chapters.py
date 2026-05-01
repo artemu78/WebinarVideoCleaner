@@ -22,11 +22,81 @@ except ImportError as e:
 
 
 
-def generate_chapters(srt_path, language=None, webinar_topic=None):
-    """Upload SRT file to Gemini and get chapters/timecodes."""
+def _build_chapters_prompt(language=None, webinar_topic=None):
+    lang_instruction = ""
+    if language:
+        # Map common codes to full names if needed, or just use the code as is.
+        # Gemini understands codes.
+        lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
+
+    topic_instruction = ""
+    if webinar_topic:
+        topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context to create more accurate and meaningful chapter titles."
+
+    return f"""
+    Analyze the uploaded SRT subtitles for this webinar/video.
+    {topic_instruction}
+    {lang_instruction}
+    
+    Your task is to create a list of timestamps (chapters) that summarize the entire content.
+    
+    1. Break down the content into logical chapters.
+    2. For each chapter, provide the Start Time (HH:MM:SS) and a Concise Title/Summary.
+    3. Ensure the chapters cover the flow of the entire video.
+    
+    Output format:
+    00:00:00 - Introduction
+    00:05:30 - Topic A description
+    00:12:45 - Key takeaway about B
+    ...
+    
+    Do not add any other conversational text, just the list of timecodes and titles.
+    """
+
+
+def _build_qa_timeline_prompt(language=None, webinar_topic=None):
+    lang_instruction = ""
+    if language:
+        lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
+
+    topic_instruction = ""
+    if webinar_topic:
+        topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context when identifying question-answer pairs and side topics."
+
+    return f"""
+    Analyze the uploaded SRT subtitles for this webinar/video.
+    {topic_instruction}
+    {lang_instruction}
+
+    Your task is to produce a timed Question/Answer sequence for a Q/A webinar.
+    Infer question and answer boundaries from the transcript text only.
+    Do not rely on speaker labels.
+
+    Rules:
+    1. Extract meaningful Q/A pairs in chronological order.
+    2. Timestamp each pair using the question start time in HH:MM:SS.
+    3. Include a concise Question summary and Answer summary.
+    4. If the answer contains side topics, include them; otherwise write "None".
+    5. Keep each summary concise and useful for quick navigation.
+
+    Output format (repeat this block for each pair):
+    [00:00:00]
+    Question: ...
+    Answer: ...
+    Side topics: topic 1; topic 2
+
+    Do not add any extra commentary outside these Q/A blocks.
+    """
+
+
+def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="chapters"):
+    """Upload SRT file to Gemini and get chapters or Q/A timeline."""
+    if output_mode not in {"chapters", "qa_timeline"}:
+        raise ValueError(f"Invalid output_mode: {output_mode}")
     
     # Determine output path early to check if it already exists
-    output_filename = os.path.splitext(srt_path)[0] + "_chapters.txt"
+    suffix = "_chapters.txt" if output_mode == "chapters" else "_qa_timeline.txt"
+    output_filename = os.path.splitext(srt_path)[0] + suffix
     if os.path.exists(output_filename):
         print(f"✓ Chapters already exist: {output_filename} (Skipping step)")
         return output_filename
@@ -81,39 +151,15 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     print("✓ File processed successfully")
     
     # Step 4: Define the Prompt
-    print("Step 4: Preparing prompt for chapters...")
-    lang_instruction = ""
-    if language:
-        # Map common codes to full names if needed, or just use the code as is.
-        # Gemini understands codes.
-        lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
-
-    topic_instruction = ""
-    if webinar_topic:
-        topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context to create more accurate and meaningful chapter titles."
-
-    prompt = f"""
-    Analyze the uploaded SRT subtitles for this webinar/video.
-    {topic_instruction}
-    {lang_instruction}
-    
-    Your task is to create a list of timestamps (chapters) that summarize the entire content.
-    
-    1. Break down the content into logical chapters.
-    2. For each chapter, provide the Start Time (HH:MM:SS) and a Concise Title/Summary.
-    3. Ensure the chapters cover the flow of the entire video.
-    
-    Output format:
-    00:00:00 - Introduction
-    00:05:30 - Topic A description
-    00:12:45 - Key takeaway about B
-    ...
-    
-    Do not add any other conversational text, just the list of timecodes and titles.
-    """
+    if output_mode == "qa_timeline":
+        print("Step 4: Preparing prompt for Q/A timeline...")
+        prompt = _build_qa_timeline_prompt(language=language, webinar_topic=webinar_topic)
+    else:
+        print("Step 4: Preparing prompt for chapters...")
+        prompt = _build_chapters_prompt(language=language, webinar_topic=webinar_topic)
     
     # Step 5: Call Gemini 3 with uploaded file
-    print(f"Step 5: Requesting chapters from {generate_chapters_model} model...")
+    print(f"Step 5: Requesting timeline from {generate_chapters_model} model...")
     try:
         response = retry_generate_content(
             model=generate_chapters_model,
@@ -137,7 +183,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
         return None
     
     # Step 6: Save response
-    print("Step 6: Saving chapters to text file...")
+    print("Step 6: Saving timeline to text file...")
     
     if not hasattr(response, 'text') or not response.text:
         print("Error: Gemini response has no text content")
@@ -147,14 +193,14 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
             pass
         return None
     
-    # Determine output filename: same basename as SRT but with _chapters.txt
-    output_filename = os.path.splitext(srt_path)[0] + "_chapters.txt"
+    # Determine output filename based on selected output mode
+    output_filename = os.path.splitext(srt_path)[0] + suffix
     # If the input was already _corrected.srt, it will become _corrected_chapters.txt
     # If we want it cleaner, we could strip _corrected, but keeping it is explicit.
     
     with open(output_filename, "w", encoding="utf-8") as f:
         f.write(response.text)
-    print(f"✓ Chapters saved to: {output_filename}")
+    print(f"✓ Timeline saved to: {output_filename}")
     
     # Step 7: Clean up uploaded file
     print("Step 7: Cleaning up uploaded file...")
@@ -164,7 +210,7 @@ def generate_chapters(srt_path, language=None, webinar_topic=None):
     except Exception as e:
         print(f"  Warning: Could not delete uploaded file: {e}")
     
-    print("\n=== Chapter generation completed successfully ===")
+    print("\n=== Timeline generation completed successfully ===")
     return output_filename
 
 if __name__ == "__main__":
