@@ -27,16 +27,17 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
         import transcribe_to_srt
         mock_parser = MagicMock()
         mock_parser_class.return_value = mock_parser
-        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language=None, webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None)
+        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language=None, webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None, provider="gemini", keep_fillers=False)
         
         mock_isdir.return_value = False
         mock_has_audio.return_value = True
         mock_exists.return_value = True 
         
-        # 1: folder(""), 2: file("video.mp4"), 3: srt("y"), 4: translate(""), 5: regenerate("n"), 6: lang("ru")
-        mock_input.side_effect = ["", "video.mp4", "y", "", "n", "ru"]
-        
-        outpath, language = transcribe_to_srt.main()
+        # folder, file, srt, translate, fillers, language, regenerate, lang for existing file
+        mock_input.side_effect = ["", "video.mp4", "y", "", "n", "", "n", "ru"]
+        srt_body = "1\n00:00:00,000 --> 00:00:01,000\nstub\n"
+        with patch("builtins.open", mock_open(read_data=srt_body)):
+            outpath, language = transcribe_to_srt.main()
         self.assertEqual(language, "ru")
 
     @patch('transcribe_to_srt.has_audio_stream')
@@ -51,16 +52,17 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
         import transcribe_to_srt
         mock_parser = MagicMock()
         mock_parser_class.return_value = mock_parser
-        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language="es", webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None)
+        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language="es", webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None, provider="gemini", keep_fillers=False)
         
         mock_isdir.return_value = False
         mock_exists.return_value = True
         mock_has_audio.return_value = True
         
-        # 1: folder(""), 2: file("video.mp4"), 3: srt("y"), 4: translate(""), 5: regenerate("n")
-        mock_input.side_effect = ["", "video.mp4", "y", "", "n"]
-        
-        outpath, language = transcribe_to_srt.main(language="es")
+        # folder, file, srt, translate, fillers, regenerate (language from main arg)
+        mock_input.side_effect = ["", "video.mp4", "y", "", "n", "n", ""]
+        srt_body = "1\n00:00:00,000 --> 00:00:01,000\nstub\n"
+        with patch("builtins.open", mock_open(read_data=srt_body)):
+            outpath, language = transcribe_to_srt.main(language="es")
         self.assertEqual(language, "es")
 
     @patch('transcribe_to_srt.has_audio_stream')
@@ -76,14 +78,14 @@ class TestTranscribeToSrtInteractive(unittest.TestCase):
         import transcribe_to_srt
         mock_parser = MagicMock()
         mock_parser_class.return_value = mock_parser
-        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language=None, webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None)
+        mock_parser.parse_args.return_value = MagicMock(folder_input=None, file_input=None, model="turbo", language=None, webinar_topic=None, skip_if_exists=False, translate_to=None, gemini_api_key=None, provider="gemini", keep_fillers=False)
         
         mock_isdir.return_value = False
         mock_exists.return_value = True
         mock_has_audio.return_value = True
         
-        # 1: folder(""), 2: file("video.mp4"), 3: srt("y"), 4: translate(""), 5: regenerate("y")
-        mock_input.side_effect = ["", "video.mp4", "y", "", "y"]
+        # 1: folder(""), 2: file("video.mp4"), 3: srt("y"), 4: translate(""), 5: keep_fillers("n"), 6: lang(""), 7: regenerate("y")
+        mock_input.side_effect = ["", "video.mp4", "y", "", "n", "", "y"]
         mock_detect.return_value = ("en", 0.99)
         mock_ws_model = MagicMock()
         mock_load.return_value = mock_ws_model

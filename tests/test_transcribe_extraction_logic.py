@@ -29,7 +29,8 @@ class TestTranscribeExtractionLogic(unittest.TestCase):
     @patch('os.path.getmtime')
     def test_skips_extraction_if_file_exists(self, mock_getmtime, mock_isdir, mock_exists, mock_open, mock_get_segments, mock_extract, mock_load, mock_detect, mock_has_audio):
         """
-        Verify that if the _extracted.mp3 file already exists, extract_mp3_from_mp4 is NOT called.
+        If _extracted.mp3 already exists, extract_mp3_from_mp4 is called to resolve reuse vs re-create;
+        in non-interactive mode it returns the existing path without running ffmpeg.
         """
         # Setup mocks
         mock_isdir.return_value = False
@@ -47,6 +48,7 @@ class TestTranscribeExtractionLogic(unittest.TestCase):
         mock_has_audio.return_value = True
         mock_detect.return_value = ("en", 0.99)
         mock_get_segments.return_value = ([], "en")
+        mock_extract.return_value = "video_extracted.mp3"
         
         # Configure whisper version
         transcribe_to_srt.whisper.__version__ = "20231117"
@@ -54,8 +56,8 @@ class TestTranscribeExtractionLogic(unittest.TestCase):
         # Run main in non-interactive mode
         transcribe_to_srt.main(file_input="video.mp4", model="base")
         
-        # Verify extract_mp3_from_mp4 was NEVER called
-        mock_extract.assert_not_called()
+        # extract_mp3_from_mp4 decides reuse (no ffmpeg when mocked)
+        mock_extract.assert_called()
         
         # Verify get_segments_from_file was called with the mp3 path
         # Note: In the code, it uses audio_path = extracted_mp3

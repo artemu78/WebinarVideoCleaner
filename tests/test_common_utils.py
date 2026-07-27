@@ -132,5 +132,50 @@ class TestCommonUtils(unittest.TestCase):
         cost, _, _ = calculate_gemini_cost(mock_response_none_tokens)
         self.assertEqual(cost, 0.0)
 
+    @patch.dict(os.environ, {"GEMINI_API_KEY": "gemini_test_key"}, clear=True)
+    @patch("common_utils.genai")
+    def test_generate_content_gemini(self, mock_genai):
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.return_value = MagicMock(text="hello from gemini")
+
+        response_text = common_utils.generate_content(
+            provider="gemini",
+            model="gemini-3.1-flash-lite-preview",
+            prompt="translate me",
+        )
+
+        self.assertEqual(response_text, "hello from gemini")
+        mock_genai.Client.assert_called_once_with(api_key="gemini_test_key")
+        mock_client.models.generate_content.assert_called_once_with(
+            model="gemini-3.1-flash-lite-preview",
+            contents="translate me",
+            config=None
+        )
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    def test_get_openrouter_api_key_env(self):
+        self.assertEqual(common_utils.get_openrouter_api_key(), "or_test_key")
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"choices":[{"message":{"content":"hello from openrouter"}}]}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        response_text = common_utils.generate_content(
+            provider="openrouter",
+            model="openai/gpt-4o-mini",
+            prompt="translate me",
+        )
+
+        self.assertEqual(response_text, "hello from openrouter")
+        self.assertTrue(mock_urlopen.called)
+        # Verify that it was called with the right headers
+        args, kwargs = mock_urlopen.call_args
+        request = args[0]
+        self.assertEqual(request.get_header("Authorization"), "Bearer or_test_key")
+
 if __name__ == '__main__':
     unittest.main()

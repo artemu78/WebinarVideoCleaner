@@ -18,10 +18,10 @@ To accurately extract speech from media files, generate properly timed SRT subti
 3. **Transcription (Whisper)**:
    - Processes the audio using the specified Whisper model (e.g., `turbo`, `large`).
    - Employs strict **anti-hallucination settings**:
-     - `condition_on_previous_text=False`: Prevents looping phrases.
+     - `condition_on_previous_text`: Dynamically set. `False` by default to prevent looping, but `True` if `keep_fillers` is enabled to better preserve natural speech patterns.
      - `no_speech_threshold=0.6`: Filters out silence better.
      - `logprob_threshold=-1.0`: Discards low-confidence transcriptions.
-   - Uses an `initial_prompt` (often enriched with a `webinar_topic`) to guide Whisper toward correct technical terminology.
+   - Uses an `initial_prompt` (often enriched with a `webinar_topic` or filler hints) to guide Whisper toward correct technical terminology.
 
 4. **Segment Chunking & Formatting**:
    - Checks segment durations against `max_segment_duration`.
@@ -29,8 +29,11 @@ To accurately extract speech from media files, generate properly timed SRT subti
    - Converts the finalized segments into standard SRT timestamp format (`HH:MM:SS,mmm`).
 
 5. **Optional Gemini Translation**:
-   - If requested, passes the generated SRT to the Gemini API (`gemini-2.0-flash`).
+   - If requested, passes the generated SRT to the Gemini API (`gemini-3.1-flash-lite-preview`).
    - Uses a strict system prompt to translate the text while leaving SRT timing and indices completely intact.
+   - **IT Glossary Support**: Automatically loads `TERMS_FOR_TRANSLATION.md` for English-to-Russian translations to ensure technical accuracy.
+   - **Filler Preservation**: If `keep_fillers` is on, Gemini is instructed to preserve "uh/um" and can proactively insert emotional tags (e.g., `[laughter]`, `[sigh]`).
+   - **Auto-Correction**: Automatically runs `correct_srt_errors.py` after translation to fix any formatting glitches introduced by the LLM.
    - Strips markdown formatting using `common_utils.clean_srt_response`.
 
 ## Key Parameters (`main()`)
@@ -38,10 +41,11 @@ To accurately extract speech from media files, generate properly timed SRT subti
 - `folder_input` / `file_input`: Target file or directory to process.
 - `--model`: Whisper model size to use (default: `turbo`).
 - `--max_segment_duration`: Maximum length in seconds for a single subtitle block (default: `8.0`).
-- `language`: Target language code. If omitted, the script attempts auto-detection.
-- `--initial_prompt`: Contextual hint for Whisper to improve accuracy (e.g., "Это запись технического вебинара...").
+- `--language`: Language code of the input file. If omitted, the script attempts auto-detection.
+- `--initial_prompt`: Contextual hint for Whisper to improve accuracy.
 - `--webinar_topic`: Optional string to further refine the `initial_prompt`.
 - `--translate_to`: Language code (e.g., `en`, `ru`) to translate the final SRT into using Gemini.
+- `--keep_fillers`: Boolean flag. If `True`, attempts to preserve filler words ("uh", "um") and enables emotional tags in translation.
 - `skip_if_exists`: If `True`, skips processing if the target output file already exists.
 - `gemini_api_key`: Optional API key for translation (otherwise fetches from environment/utils).
 

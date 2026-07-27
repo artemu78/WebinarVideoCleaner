@@ -61,13 +61,14 @@ class TestMainVideoEditor(unittest.TestCase):
         from main_video_editor import main
         mock_exists.return_value = True
         
-        # 1: video.mp4, 2: mode(1), 3: outline(1), 4: topic(""), 5: audio(""), 6: model(""), 7: lang(""), 8: translate("")
-        mock_input.side_effect = ["video.mp4", "1", "1", "", "", "", "", ""]
+        # 1: video.mp4, 2: mode(1), 3: provider(1-default), 4: outline(1), 5: topic(""), 6: audio(""), 7: model(""), 8: lang(""), 9: keep_fillers("n"), 10: translate("")
+        mock_input.side_effect = ["video.mp4", "1", "", "1", "", "", "", "", "n", ""]
         
         mock_transcribe.main.return_value = (os.path.abspath("video.srt"), "en")
         mock_correct.process_srt_correction.return_value = os.path.abspath("video_corrected.srt")
         mock_cleaner.process_srt_file.return_value = os.path.abspath("gemini_response.txt")
         mock_utils.get_total_gemini_cost.return_value = 0.0
+        mock_utils.get_tracked_user_input_seconds.return_value = 0.0
         mock_check.check_alignment.return_value = True
         
         with patch('main_video_editor.convert_gemini_response_to_cut_format') as mock_convert:
@@ -113,14 +114,15 @@ class TestMainVideoEditor(unittest.TestCase):
             return True
         mock_exists.side_effect = exists_side_effect
         
-        # 1: video.mp4, 2: mode(1), 3: outline(2), 4: Topic, 5: audio(y), 6: model(small), 7: lang(ru), 8: translate("")
-        mock_input.side_effect = ["video.mp4", "1", "2", "Topic", "y", "small", "ru", ""]
+        # 1: video.mp4, 2: mode(1), 3: provider(1-default), 4: outline(2-qa_timeline), 5: Topic, 6: audio(n), 7: model(small), 8: lang(ru), 9: keep_fillers(n), 10: translate("")
+        mock_input.side_effect = ["video.mp4", "1", "", "2", "Topic", "n", "2", "ru", "n", ""]
         
         mock_check.check_alignment.return_value = True
         mock_transcribe.main.return_value = (os.path.abspath("video.srt"), "en")
         mock_correct.process_srt_correction.return_value = os.path.abspath("video_corrected.srt")
         mock_cleaner.process_srt_file.return_value = os.path.abspath("gemini_response.txt")
         mock_utils.get_total_gemini_cost.return_value = 0.5
+        mock_utils.get_tracked_user_input_seconds.return_value = 0.0
         
         with patch('main_video_editor.convert_gemini_response_to_cut_format') as mock_convert:
             mock_convert.return_value = os.path.abspath("ranges.json")

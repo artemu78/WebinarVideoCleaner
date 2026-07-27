@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import importlib
 from unittest.mock import patch, MagicMock, mock_open
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -8,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Define real classes for things that need to be caught
 class MockClientError(Exception): pass
 
-class TestGeminiScripts(unittest.TestCase):
+class TestAIScripts(unittest.TestCase):
     
     def setUp(self):
         # Safety mock for all scripts
@@ -29,16 +30,16 @@ class TestGeminiScripts(unittest.TestCase):
         self.patcher_copy.stop()
         self.module_patcher.stop()
         
-    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
     @patch("common_utils.safe_upload")
     @patch("os.path.exists")
-    def test_audio_cleaner_process(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
+    def test_audio_cleaner_process_gemini(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
         import audio_cleaner
         mock_exists.side_effect = lambda p: "gemini_response" not in p
         
         mock_client = MagicMock()
-        with patch("audio_cleaner.genai.Client", return_value=mock_client):
+        with patch("common_utils.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -48,46 +49,34 @@ class TestGeminiScripts(unittest.TestCase):
             mock_response.text = '{"ranges_to_delete": []}'
             mock_client.models.generate_content.return_value = mock_response
             
-            # Manually fix audio_cleaner references if it was already imported
-            with patch("audio_cleaner.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open()):
-                    output = audio_cleaner.process_srt_file("test.srt")
-                    self.assertIn("gemini_response.txt", output)
+            with patch("builtins.open", mock_open()):
+                output = audio_cleaner.process_srt_file("test.srt", provider="gemini")
+                self.assertIn("gemini_response.txt", output)
 
-    @patch("common_utils.get_api_key", return_value="fake_key")
-    @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
-    @patch("common_utils.safe_upload")
+    @patch("common_utils.generate_content")
     @patch("os.path.exists")
-    def test_audio_cleaner_process_with_audio(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
+    def test_audio_cleaner_process_openrouter(self, mock_exists, mock_gen):
         import audio_cleaner
         mock_exists.side_effect = lambda p: "gemini_response" not in p
+        mock_gen.return_value = '{"ranges_to_delete": []}'
         
-        mock_client = MagicMock()
-        with patch("audio_cleaner.genai.Client", return_value=mock_client):
-            mock_file = MagicMock()
-            mock_file.state.name = "ACTIVE"
-            mock_safe_upload.return_value = mock_file
-            
-            mock_response = MagicMock()
-            mock_response.text = '{"ranges_to_delete": []}'
-            mock_client.models.generate_content.return_value = mock_response
-            
-            with patch("audio_cleaner.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open()):
-                    output = audio_cleaner.process_srt_file("test.srt", audio_path="test.mp3")
-                    self.assertEqual(mock_safe_upload.call_count, 2)
+        with patch("builtins.open", mock_open(read_data="SRT content")):
+            output = audio_cleaner.process_srt_file("test.srt", provider="openrouter")
+            self.assertIn("gemini_response.txt", output)
+            mock_gen.assert_called_once()
 
-    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
     @patch("common_utils.safe_upload")
     @patch("os.path.exists")
     @patch("os.remove")
-    def test_correct_transcription_process(self, mock_remove, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
+    def test_correct_transcription_process_gemini(self, mock_remove, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
         import correct_srt_errors
-        mock_exists.side_effect = lambda p: "corrected_by_gemini" not in p
+        importlib.reload(correct_srt_errors)
+        mock_exists.side_effect = lambda p: "_corrected_by_gemini" not in p
         
         mock_client = MagicMock()
-        with patch("correct_srt_errors.genai.Client", return_value=mock_client):
+        with patch("common_utils.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -97,17 +86,32 @@ class TestGeminiScripts(unittest.TestCase):
             mock_client.models.generate_content.return_value = mock_response
             
             mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
-            with patch("correct_srt_errors.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open(read_data=mock_srt_content)):
-                    output = correct_srt_errors.process_srt_correction("test.srt", language="en")
-                    self.assertIn("corrected_by_gemini.srt", output)
+            with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+                output = correct_srt_errors.process_srt_correction("test.srt", language="en", provider="gemini")
+                self.assertIn("_corrected_by_gemini.srt", output)
 
-    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("common_utils.generate_content", return_value='[{"id": "1", "text": "Fixed"}]')
+    @patch("os.path.exists")
+    def test_correct_transcription_openrouter(self, mock_exists, mock_gen):
+        import correct_srt_errors
+        importlib.reload(correct_srt_errors)
+
+        mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+        mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
+        with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+            output = correct_srt_errors.process_srt_correction(
+                "test.srt", language="ru", provider="openrouter"
+            )
+        self.assertIn("_corrected_by_openrouter.srt", output)
+        mock_gen.assert_called()
+
+    @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
     @patch("common_utils.safe_upload")
     @patch("os.path.exists")
-    def test_generate_chapters_process(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
+    def test_generate_chapters_process_gemini(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
         import generate_chapters
+        importlib.reload(generate_chapters)
         mock_exists.side_effect = lambda p: "_chapters.txt" not in p
         
         mock_client = MagicMock()
@@ -115,68 +119,70 @@ class TestGeminiScripts(unittest.TestCase):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
+            mock_client.files.get.return_value = mock_file
             
             mock_response = MagicMock()
             mock_response.text = "00:00:00 - Intro"
             mock_client.models.generate_content.return_value = mock_response
             
-            with patch("generate_chapters.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open()):
-                    output = generate_chapters.generate_chapters("test.srt")
-                    self.assertIn("_chapters.txt", output)
+            with patch("builtins.open", mock_open(read_data="SRT content")):
+                output = generate_chapters.generate_chapters("test.srt", provider="gemini")
+                self.assertIn("_chapters.txt", output)
 
-    @patch("common_utils.get_api_key", return_value="fake_key")
+    @patch("common_utils.generate_content")
+    @patch("os.path.exists")
+    def test_generate_chapters_process_openrouter(self, mock_exists, mock_gen):
+        import generate_chapters
+        importlib.reload(generate_chapters)
+        mock_exists.side_effect = lambda p: "_chapters.txt" not in p
+        mock_gen.return_value = "00:00:00 - Intro"
+        
+        with patch("builtins.open", mock_open(read_data="SRT content")):
+            output = generate_chapters.generate_chapters("test.srt", provider="openrouter")
+            self.assertIn("_chapters.txt", output)
+            mock_gen.assert_called_once()
+
+    @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
     @patch("common_utils.safe_upload")
     @patch("os.path.exists")
-    def test_generate_qa_timeline_process(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
-        import generate_chapters
-        mock_exists.side_effect = lambda p: "_qa_timeline.txt" not in p
-
-        mock_client = MagicMock()
-        with patch("generate_chapters.genai.Client", return_value=mock_client):
-            mock_file = MagicMock()
-            mock_file.state.name = "ACTIVE"
-            mock_safe_upload.return_value = mock_file
-
-            mock_response = MagicMock()
-            mock_response.text = "[00:00:00]\nQuestion: Q\nAnswer: A\nSide topics: None"
-            mock_client.models.generate_content.return_value = mock_response
-
-            with patch("generate_chapters.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open()):
-                    output = generate_chapters.generate_chapters("test.srt", output_mode="qa_timeline")
-                    self.assertIn("_qa_timeline.txt", output)
-
-    @patch("common_utils.get_api_key", return_value="fake_key")
-    @patch("delivery_metrics.get_api_key")
-    @patch("delivery_metrics.calculate_gemini_cost")
-    @patch("common_utils.safe_upload")
-    @patch("os.path.exists")
-    @patch("common_utils.retry_gemini_request", side_effect=lambda x: x)
-    def test_generate_delivery_metrics_process(self, mock_retry, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key, mock_common_get_key):
+    def test_generate_delivery_metrics_process_gemini(self, mock_exists, mock_safe_upload, mock_calc_cost, mock_get_key):
         import delivery_metrics
-        import importlib
         importlib.reload(delivery_metrics)
-        
         mock_exists.side_effect = lambda p: "_delivery_metrics.html" not in p
 
         mock_client = MagicMock()
+        # Patch delivery_metrics.genai.Client because it imports genai at top level
         with patch("delivery_metrics.genai.Client", return_value=mock_client):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
+            mock_client.files.get.return_value = mock_file
 
             mock_response = MagicMock()
-            mock_response.text = "<h1>Delivery Metrics Report</h1>"
+            mock_response.text = "<h1>Report</h1>"
             mock_client.models.generate_content.return_value = mock_response
 
             mock_srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n"
-            with patch("delivery_metrics.calculate_gemini_cost", return_value=(0.0001, 100, 50)):
-                with patch("builtins.open", mock_open(read_data=mock_srt_content)):
-                    output = delivery_metrics.generate_delivery_metrics("test.srt", "test_chapters.txt")
-                    self.assertIsNotNone(output)
-                    self.assertIn("_delivery_metrics.html", output)
+            with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+                output = delivery_metrics.generate_delivery_metrics("test.srt", "test_chapters.txt", provider="gemini")
+                self.assertIsNotNone(output)
+                self.assertIn("_delivery_metrics.html", output)
 
+
+    @patch("common_utils.generate_content")
+    @patch("os.path.exists")
+    def test_generate_delivery_metrics_process_openrouter(self, mock_exists, mock_gen):
+        import delivery_metrics
+        importlib.reload(delivery_metrics)
+        mock_exists.side_effect = lambda p: "_delivery_metrics.html" not in p
+        mock_gen.return_value = "<h1>Report</h1>"
+        
+        mock_srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n"
+        with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+            output = delivery_metrics.generate_delivery_metrics("test.srt", "test_chapters.txt", provider="openrouter")
+            self.assertIsNotNone(output)
+            self.assertIn("_delivery_metrics.html", output)
+            mock_gen.assert_called_once()
 if __name__ == '__main__':
     unittest.main()

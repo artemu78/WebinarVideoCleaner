@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "openrouter-models": {
+      "source": "openrouter.ai",
+      "sourceType": "well-known",
+      "computedHash": "982db6e9221e477604644789a1056afad69cc7e19979cd87ec0ad18d80651089"
+    }
+  }
+}

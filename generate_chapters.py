@@ -6,27 +6,22 @@ from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_co
 
 load_dotenv()
 generate_chapters_model = "gemini-3-flash-preview"
+generate_chapters_openrouter_model = "google/gemini-2.5-flash"
+
 # Check if google.genai is available
 try:
     import google.genai as genai
     from google.genai import types
     from google.genai.errors import ClientError
 except ImportError as e:
-    print("Error: google-genai package not found.")
-    print("Please run the script using one of these methods:")
-    print("  1. ./generate_chapters.py")
-    print("  2. venv/bin/python generate_chapters.py")
-    print("  3. source venv/bin/activate && python generate_chapters.py")
-    print("\nOr install the package: pip install google-genai")
-    exit(1)
-
+    genai = None
+    types = None
+    ClientError = Exception
 
 
 def _build_chapters_prompt(language=None, webinar_topic=None):
     lang_instruction = ""
     if language:
-        # Map common codes to full names if needed, or just use the code as is.
-        # Gemini understands codes.
         lang_instruction = f"The input is in {language} language. Please generate the response in {language}."
 
     topic_instruction = ""
@@ -34,7 +29,7 @@ def _build_chapters_prompt(language=None, webinar_topic=None):
         topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context to create more accurate and meaningful chapter titles."
 
     return f"""
-    Analyze the uploaded SRT subtitles for this webinar/video.
+    Analyze the provided SRT subtitles for this webinar/video.
     {topic_instruction}
     {lang_instruction}
     
@@ -64,7 +59,7 @@ def _build_qa_timeline_prompt(language=None, webinar_topic=None):
         topic_instruction = f"The topic of this webinar is: '{webinar_topic}'. Use this context when identifying question-answer pairs and side topics."
 
     return f"""
-    Analyze the uploaded SRT subtitles for this webinar/video.
+    Analyze the provided SRT subtitles for this webinar/video.
     {topic_instruction}
     {lang_instruction}
 
@@ -89,8 +84,11 @@ def _build_qa_timeline_prompt(language=None, webinar_topic=None):
     """
 
 
-def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="chapters"):
-    """Upload SRT file to Gemini and get chapters or Q/A timeline."""
+def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="chapters", provider="gemini", model=None):
+    """Upload SRT file to Gemini or send text to OpenRouter to get chapters or Q/A timeline."""
+    provider = (provider or "gemini").strip().lower()
+    model = model or (generate_chapters_openrouter_model if provider == "openrouter" else generate_chapters_model)
+
     if output_mode not in {"chapters", "qa_timeline"}:
         raise ValueError(f"Invalid output_mode: {output_mode}")
     
@@ -98,117 +96,88 @@ def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="
     suffix = "_chapters.txt" if output_mode == "chapters" else "_qa_timeline.txt"
     output_filename = os.path.splitext(srt_path)[0] + suffix
     if os.path.exists(output_filename):
-        print(f"✓ Chapters already exist: {output_filename} (Skipping step)")
+        print(f"✓ AI response file already exists: {output_filename} (Skipping step)")
         return output_filename
 
-    # Step 1: Initialize Client
-    print("Step 1: Initializing Gemini client...")
-    api_key = get_api_key()
-    client = genai.Client(api_key=api_key)
-    print("✓ Client initialized successfully")
+    # Step 1: Prepare Content & Prompt
+    print(f"Step 1: Preparing {output_mode} (Provider: {provider}, Model: {model})...")
     
-    # Define wrapped methods for retries
-    retry_generate_content = retry_gemini_request(client.models.generate_content)
-    retry_get_file = retry_gemini_request(client.files.get)
-    retry_delete_file = retry_gemini_request(client.files.delete)
-    
-    # Step 2: Upload SRT file
-    print(f"Step 2: Uploading SRT file: {srt_path}...")
     if not os.path.exists(srt_path):
         print(f"Error: SRT file not found: {srt_path}")
         return None
-    
-    try:
-        uploaded_file = safe_upload(client, srt_path, "text/plain")
-        print(f"✓ File uploaded successfully. File URI: {uploaded_file.uri}")
-    except ClientError as e:
-        error_message = str(e)
-        if "location is not supported" in error_message.lower() or "FAILED_PRECONDITION" in error_message:
-            print("\n❌ Error: Geographic restriction")
-            print("The Gemini API is not available in your current location.")
-        else:
-            print(f"\n❌ Error uploading file: {e}")
-        return None
-    except Exception as e:
-        print(f"\n❌ Unexpected error uploading file: {e}")
-        return None
-    
-    # Step 3: Wait for file to be processed
-    print("Step 3: Waiting for file to be processed...")
-    try:
-        while uploaded_file.state.name == "PROCESSING":
-            print("  File is still processing, waiting...")
-            time.sleep(2)
-            uploaded_file = retry_get_file(name=uploaded_file.name)
         
-        if uploaded_file.state.name == "FAILED":
-            print("Error: File processing failed")
-            return None
-    except Exception as e:
-        print(f"\n❌ Error during file processing: {e}")
-        return None
-    
-    print("✓ File processed successfully")
-    
-    # Step 4: Define the Prompt
+    with open(srt_path, "r", encoding="utf-8") as f:
+        srt_content = f.read()
+
     if output_mode == "qa_timeline":
-        print("Step 4: Preparing prompt for Q/A timeline...")
-        prompt = _build_qa_timeline_prompt(language=language, webinar_topic=webinar_topic)
+        prompt_builder = _build_qa_timeline_prompt
     else:
-        print("Step 4: Preparing prompt for chapters...")
-        prompt = _build_chapters_prompt(language=language, webinar_topic=webinar_topic)
-    
-    # Step 5: Call Gemini 3 with uploaded file
-    print(f"Step 5: Requesting timeline from {generate_chapters_model} model...")
-    try:
-        response = retry_generate_content(
-            model=generate_chapters_model,
-            contents=[
-                types.Part.from_uri(
-                    file_uri=uploaded_file.uri,
-                    mime_type=uploaded_file.mime_type
-                ),
-                prompt
-            ]
-        )
-        # Calculate and print cost
-        cost, input_tokens, output_tokens = calculate_gemini_cost(response)
-        print(f"✓ Response received from Gemini (Cost: ${cost:.6f} | Tokens: {input_tokens} in / {output_tokens} out)")
-    except Exception as e:
-        print(f"\n❌ Error generating content: {e}")
+        prompt_builder = _build_chapters_prompt
+        
+    prompt_base = prompt_builder(language=language, webinar_topic=webinar_topic)
+
+    response_text = ""
+    if provider == "openrouter":
+        print("Using OpenRouter (Text-based analysis)...")
+        prompt = f"{prompt_base}\n\nInput SRT content:\n{srt_content}"
+        from common_utils import generate_content
         try:
-            retry_delete_file(name=uploaded_file.name)
-        except:
-            pass
-        return None
-    
+            response_text = generate_content(provider="openrouter", model=model, prompt=prompt)
+        except Exception as e:
+            print(f"\n❌ Error calling OpenRouter: {e}")
+            return None
+            
+    else:
+        # Gemini Path (File Uploads)
+        print("Using Google Gemini (File-based analysis)...")
+        api_key = get_api_key()
+        client = genai.Client(api_key=api_key)
+        
+        # Define wrapped methods for retries
+        retry_generate_content = retry_gemini_request(client.models.generate_content)
+        retry_get_file = retry_gemini_request(client.files.get)
+        retry_delete_file = retry_gemini_request(client.files.delete)
+        
+        uploaded_file = None
+        try:
+            uploaded_file = safe_upload(client, srt_path, "text/plain")
+            while uploaded_file.state.name == "PROCESSING":
+                time.sleep(2)
+                uploaded_file = retry_get_file(name=uploaded_file.name)
+            
+            if uploaded_file.state.name == "FAILED":
+                print("Error: File processing failed")
+                return None
+                
+            response = retry_generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_uri(file_uri=uploaded_file.uri, mime_type=uploaded_file.mime_type),
+                    prompt_base
+                ]
+            )
+            
+            from common_utils import calculate_gemini_cost
+            cost, input_tokens, output_tokens = calculate_gemini_cost(response)
+            print(f"✓ Response received from Gemini (Cost: ${cost:.6f} | Tokens: {input_tokens} in / {output_tokens} out)")
+            response_text = response.text
+            
+        except Exception as e:
+            print(f"\n❌ Error calling Gemini: {e}")
+            return None
+        finally:
+            if uploaded_file:
+                try: retry_delete_file(name=uploaded_file.name)
+                except: pass
+
     # Step 6: Save response
-    print("Step 6: Saving timeline to text file...")
-    
-    if not hasattr(response, 'text') or not response.text:
-        print("Error: Gemini response has no text content")
-        try:
-            retry_delete_file(name=uploaded_file.name)
-        except:
-            pass
+    if not response_text or not response_text.strip():
+        print("Error: AI response is empty")
         return None
-    
-    # Determine output filename based on selected output mode
-    output_filename = os.path.splitext(srt_path)[0] + suffix
-    # If the input was already _corrected.srt, it will become _corrected_chapters.txt
-    # If we want it cleaner, we could strip _corrected, but keeping it is explicit.
     
     with open(output_filename, "w", encoding="utf-8") as f:
-        f.write(response.text)
+        f.write(response_text)
     print(f"✓ Timeline saved to: {output_filename}")
-    
-    # Step 7: Clean up uploaded file
-    print("Step 7: Cleaning up uploaded file...")
-    try:
-        retry_delete_file(name=uploaded_file.name)
-        print("✓ Uploaded file deleted from Gemini")
-    except Exception as e:
-        print(f"  Warning: Could not delete uploaded file: {e}")
     
     print("\n=== Timeline generation completed successfully ===")
     return output_filename

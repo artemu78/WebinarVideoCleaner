@@ -8,6 +8,7 @@ from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_co
 
 load_dotenv()
 delivery_metrics_model = "gemini-3-flash-preview"
+delivery_metrics_openrouter_model = "google/gemini-2.5-flash"
 
 # Check if google.genai is available
 try:
@@ -15,9 +16,9 @@ try:
     from google.genai import types
     from google.genai.errors import ClientError
 except ImportError as e:
-    print("Error: google-genai package not found.")
-    print("Please install the package: pip install google-genai")
-    exit(1)
+    genai = None
+    types = None
+    ClientError = Exception
 
 def parse_srt_for_metrics(filepath):
     """
@@ -107,11 +108,14 @@ def read_chapters(chapters_path):
     with open(chapters_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_topic=None):
+def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_topic=None, provider="gemini", model=None):
     """
     Calculates delivery metrics using a combination of manual processing
-    and Gemini analysis.
+    and Gemini/OpenRouter analysis.
     """
+    provider = (provider or "gemini").strip().lower()
+    model = model or (delivery_metrics_openrouter_model if provider == "openrouter" else delivery_metrics_model)
+
     # Determine output path early to check if it already exists
     base_path = os.path.splitext(srt_path)[0]
     output_path = f"{base_path}_delivery_metrics.html"
@@ -119,42 +123,16 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
         print(f"✓ Delivery metrics report already exists: {output_path} (Skipping step)")
         return output_path
 
-    print(f"Calculating delivery metrics for: {srt_path}")
+    print(f"Calculating delivery metrics for: {srt_path} (Provider: {provider}, Model: {model})")
 
-    # Step 1: Initialize Client
-    api_key = get_api_key()
-    client = genai.Client(api_key=api_key)
-    
-    # Define wrapped methods for retries
-    retry_generate_content = retry_gemini_request(client.models.generate_content)
-    retry_get_file = retry_gemini_request(client.files.get)
-    retry_delete_file = retry_gemini_request(client.files.delete)
-    
-    # Step 2: Manual Metrics
+    # Step 1: Manual Metrics
     srt_blocks = parse_srt_for_metrics(srt_path)
     manual_metrics = calculate_manual_metrics(srt_blocks)
     
-    # Step 3: Upload SRT to Gemini for deeper analysis
-    print(f"Uploading SRT file for linguistic and speaker analysis...")
-    uploaded_file = None
-    try:
-        uploaded_file = safe_upload(client, srt_path, "text/plain")
-        while uploaded_file.state.name == "PROCESSING":
-            time.sleep(2)
-            uploaded_file = retry_get_file(name=uploaded_file.name)
-        
-        if uploaded_file.state.name == "FAILED":
-            print("Error: File processing failed")
-            return None
-    except Exception as e:
-        print(f"Error uploading SRT: {e}")
-        return None
-
-    # Step 4: Define Prompt
+    # Step 2: Prepare Prompt & Call AI
     chapters_content = read_chapters(chapters_path)
     topic_context = f"Webinar Topic: {webinar_topic}\n" if webinar_topic else ""
     
-    # We combine manual metrics to give Gemini more context
     dead_air_intervals_str = ""
     if manual_metrics['dead_air_intervals']:
         dead_air_intervals_str = "\n    Long Silence Intervals:\n"
@@ -171,9 +149,9 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
     {dead_air_intervals_str}
     """
 
-    prompt = f"""
+    prompt_base = f"""
     You are an expert educational consultant and speech coach.
-    Analyze the attached SRT subtitles and the provided chapters for a webinar.
+    Analyze the provided SRT subtitles and the provided chapters for a webinar.
     
     IMPORTANT: Write the entire report in the following language: {language}.
     
@@ -219,30 +197,73 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
     Be objective and critical.
     """
 
-    print(f"Requesting deep analysis from Gemini (model: {delivery_metrics_model})...")
-    try:
-        response = retry_generate_content(
-            model=delivery_metrics_model,
-            contents=[
-                types.Part.from_uri(
-                    file_uri=uploaded_file.uri,
-                    mime_type=uploaded_file.mime_type
-                ),
-                prompt
-            ]
-        )
+    report_body = ""
+    if provider == "openrouter":
+        print("Using OpenRouter (Text-based analysis)...")
+        with open(srt_path, "r", encoding="utf-8") as f:
+            srt_content = f.read()
+            
+        prompt = f"{prompt_base}\n\nInput SRT content:\n{srt_content}"
+        from common_utils import generate_content
+        try:
+            report_body = generate_content(provider="openrouter", model=model, prompt=prompt)
+        except Exception as e:
+            print(f"\n❌ Error calling OpenRouter: {e}")
+            return None
+            
+    else:
+        # Gemini Path (File Uploads)
+        print("Using Google Gemini (File-based analysis)...")
+        api_key = get_api_key()
+        client = genai.Client(api_key=api_key)
         
-        cost, in_tok, out_tok = calculate_gemini_cost(response)
-        print(f"✓ Analysis complete. Cost: ${cost:.6f} | Tokens: {in_tok} in / {out_tok} out")
+        # Define wrapped methods for retries
+        retry_generate_content = retry_gemini_request(client.models.generate_content)
+        retry_get_file = retry_gemini_request(client.files.get)
+        retry_delete_file = retry_gemini_request(client.files.delete)
         
-        # Step 5: Save the report
-        report_body = response.text
-        
-        # Clean up possible markdown code blocks if Gemini includes them
-        report_body = re.sub(r'^```html\n?', '', report_body)
-        report_body = re.sub(r'\n?```$', '', report_body)
+        uploaded_file = None
+        try:
+            uploaded_file = safe_upload(client, srt_path, "text/plain")
+            while uploaded_file.state.name == "PROCESSING":
+                time.sleep(2)
+                uploaded_file = retry_get_file(name=uploaded_file.name)
+            
+            if uploaded_file.state.name == "FAILED":
+                print("Error: File processing failed")
+                return None
+                
+            response = retry_generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_uri(file_uri=uploaded_file.uri, mime_type=uploaded_file.mime_type),
+                    prompt_base
+                ]
+            )
+            
+            from common_utils import calculate_gemini_cost
+            cost, in_tok, out_tok = calculate_gemini_cost(response)
+            print(f"✓ Analysis complete. Cost: ${cost:.6f} | Tokens: {in_tok} in / {out_tok} out")
+            report_body = response.text
+            
+        except Exception as e:
+            print(f"Error during Gemini analysis: {e}")
+            return None
+        finally:
+            if uploaded_file:
+                try: retry_delete_file(name=uploaded_file.name)
+                except: pass
 
-        full_html = f"""<!DOCTYPE html>
+    # Step 3: Save the report
+    if not report_body or not report_body.strip():
+        print("Error: AI response is empty")
+        return None
+        
+    # Clean up possible markdown code blocks
+    report_body = re.sub(r'^```html\n?', '', report_body)
+    report_body = re.sub(r'\n?```$', '', report_body)
+
+    full_html = f"""<!DOCTYPE html>
 <html lang="{language}">
 <head>
     <meta charset="utf-8">
@@ -252,23 +273,12 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
 {report_body}
 </body>
 </html>"""
+    
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(full_html)
         
-        base_path = os.path.splitext(srt_path)[0]
-        output_path = f"{base_path}_delivery_metrics.html"
-        
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(full_html)
-            
-        print(f"✓ Delivery metrics report saved to: {output_path}")
-        return output_path
-
-    except Exception as e:
-        print(f"Error during Gemini analysis: {e}")
-        return None
-    finally:
-        if uploaded_file:
-            try: retry_delete_file(name=uploaded_file.name)
-            except: pass
+    print(f"✓ Delivery metrics report saved to: {output_path}")
+    return output_path
 
 if __name__ == "__main__":
     import sys

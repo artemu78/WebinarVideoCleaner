@@ -1,16 +1,75 @@
+import builtins
+import contextlib
 import os
 import time
+import json
+import urllib.request
+import re
+import shutil
+import tempfile
+import functools
 
-def get_api_key(filepath="gemini_key.txt"):
+# Try to import google.genai for safe_upload typing/config
+try:
+    import google.genai as genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
+
+# When enabled, `timed_input` accumulates wall time spent waiting on the user (for execution metrics).
+_track_user_input_time = False
+_tracked_user_input_seconds = 0.0
+
+
+def track_user_input_time_begin():
+    """Start excluding user typing time from measured script execution (resets the accumulator)."""
+    global _track_user_input_time, _tracked_user_input_seconds
+    _tracked_user_input_seconds = 0.0
+    _track_user_input_time = True
+
+
+def track_user_input_time_end():
+    """Stop accumulating user-input time (does not clear the last total; call get_tracked_user_input_seconds first if needed)."""
+    global _track_user_input_time
+    _track_user_input_time = False
+
+
+def get_tracked_user_input_seconds():
+    """Seconds spent inside `timed_input` since the last `track_user_input_time_begin`."""
+    return _tracked_user_input_seconds
+
+
+@contextlib.contextmanager
+def track_user_input_time_scope():
+    """Begin tracking user input time for this block; always ends tracking on exit."""
+    track_user_input_time_begin()
+    try:
+        yield
+    finally:
+        track_user_input_time_end()
+
+
+def timed_input(prompt=""):
+    """Like built-in input; when tracking is on, adds wait time to the user-input accumulator."""
+    t0 = time.perf_counter()
+    try:
+        return builtins.input(prompt)
+    finally:
+        if _track_user_input_time:
+            global _tracked_user_input_seconds
+            _tracked_user_input_seconds += time.perf_counter() - t0
+
+def get_gemini_api_key(filepath="gemini_key.txt"):
     """
     Reads the Gemini API key.
     Priority:
-    1. Environment variable GEMINI_API_KEY
+    1. Environment variable GEMINI_API_KEY (or GOOGLE_API_KEY)
     2. Local file (default: gemini_key.txt)
     3. User input (and optionally saves to .env)
     """
-    # 1. Check environment variable
-    api_key = os.environ.get("GEMINI_API_KEY")
+    # 1. Check environment variables
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if api_key:
         return api_key.strip()
     
@@ -21,14 +80,14 @@ def get_api_key(filepath="gemini_key.txt"):
     
     # 3. Prompt user
     print(f"Gemini API key not found in environment or file: {filepath}")
-    api_key = input("Please enter your Gemini API key: ").strip()
+    api_key = timed_input("Please enter your Gemini API key: ").strip()
     
     if not api_key:
         print("Error: No API key provided.")
         exit(1)
     
     # Ask if user wants to save to .env
-    save_env = input("Save to .env file? (y/n, default y): ").strip().lower()
+    save_env = timed_input("Save to .env file? (y/n, default y): ").strip().lower()
     if save_env != 'n':
         try:
             with open(".env", "a") as f:
@@ -38,6 +97,50 @@ def get_api_key(filepath="gemini_key.txt"):
             print(f"Warning: Could not save API key to .env: {e}")
             
     return api_key
+
+# Alias for backward compatibility
+get_api_key = get_gemini_api_key
+
+def get_openrouter_api_key(filepath="openrouter_key.txt"):
+    """
+    Reads the OpenRouter API key.
+    Priority:
+    1. Environment variable OPENROUTER_API_KEY
+    2. Local file (default: openrouter_key.txt)
+    3. User input (and optionally saves to .env)
+    """
+    # 1. Check environment variable
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if api_key:
+        return api_key.strip()
+
+    # 2. Check local file
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    # 3. Prompt user
+    print(f"OpenRouter API key not found in environment or file: {filepath}")
+    api_key = timed_input("Please enter your OpenRouter API key: ").strip()
+    
+    if not api_key:
+        print("Error: No OpenRouter API key provided.")
+        exit(1)
+    
+    # Ask if user wants to save to .env
+    save_env = timed_input("Save to .env file? (y/n, default y): ").strip().lower()
+    if save_env != 'n':
+        try:
+            with open(".env", "a") as f:
+                f.write(f"\nOPENROUTER_API_KEY={api_key}\n")
+            print("✓ API key saved to .env")
+        except Exception as e:
+            print(f"Warning: Could not save API key to .env: {e}")
+            
+    return api_key
+
+# Alias for internal use if needed
+_get_openrouter_api_key = get_openrouter_api_key
 
 def parse_time_to_ms(time_str):
     """
@@ -88,6 +191,77 @@ def clean_srt_response(text):
     text = text.replace("```srt", "").replace("```", "")
     return text.strip()
 
+def parse_srt_to_blocks(content):
+    """
+    Parses SRT content into a list of dictionaries.
+    Each dict: {'index': str, 'start': str, 'end': str, 'text': str}
+    """
+    # Split by double newlines to get blocks (handling potential CRLF and varying whitespace)
+    blocks = re.split(r'\n\s*\n', content.strip())
+    
+    parsed_blocks = []
+    for block in blocks:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3:
+            # First line is index
+            index = lines[0].strip()
+            # Second line is timestamp
+            timestamps = lines[1].strip()
+            # The rest is text
+            text = "\n".join(lines[2:])
+            
+            # Extract start and end times
+            try:
+                if ' --> ' in timestamps:
+                    start, end = timestamps.split(' --> ')
+                    parsed_blocks.append({
+                        'index': index,
+                        'start': start,
+                        'end': end,
+                        'text': text
+                    })
+            except ValueError:
+                continue
+                
+    return parsed_blocks
+
+def blocks_to_srt_str(blocks):
+    """
+    Writes a list of block dictionaries to an SRT string.
+    """
+    lines = []
+    for block in blocks:
+        lines.append(f"{block['index']}")
+        lines.append(f"{block['start']} --> {block['end']}")
+        lines.append(f"{block['text']}")
+        lines.append("")
+    return "\n".join(lines)
+
+def parse_json_array(text):
+    """
+    Robustly parse a JSON list from an LLM response, tolerating markdown and extra text.
+    """
+    t = (text or "").strip()
+    # Remove markdown fences
+    for prefix in ("```json", "```JSON", "```"):
+        if t.startswith(prefix):
+            t = t[len(prefix) :].lstrip()
+            break
+    if "```" in t:
+        t = t.split("```")[0].strip()
+    
+    # Find the JSON array part
+    start = t.find("[")
+    end = t.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        t = t[start : end + 1]
+    
+    try:
+        return json.loads(t)
+    except Exception:
+        # If it's not a valid JSON array, return None so the caller can handle it
+        return None
+
 # Cost tracking
 _TOTAL_GEMINI_COST = 0.0
 
@@ -133,15 +307,6 @@ def get_total_gemini_cost():
     global _TOTAL_GEMINI_COST
     return _TOTAL_GEMINI_COST
 
-# Try to import google.genai for safe_upload typing/config
-try:
-    from google.genai import types
-except ImportError:
-    types = None
-
-import shutil
-import tempfile
-import functools
 
 def retry_gemini_request(func):
     """
@@ -154,24 +319,15 @@ def retry_gemini_request(func):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                print(f"\n[Gemini API Error] {e}")
+                print(f"\n[AI API Error] {e}")
                 print("Connection failed. Please check your internet connection and API status.")
-                input("Press Enter to retry the request...")
+                timed_input("Press Enter to retry the request...")
                 print("Retrying...")
     return wrapper
 
-@retry_gemini_request
 def safe_upload(client, file_path, mime_type):
     """
     Uploads a file to Gemini using a safe temporary ASCII filename to avoid Unicode errors.
-    
-    Args:
-        client: The initialized Gemini client.
-        file_path (str): The absolute path to the file to upload.
-        mime_type (str): The MIME type of the file.
-        
-    Returns:
-        The uploaded file object from Gemini.
     """
     if types is None:
         raise ImportError("google.genai package is required for safe_upload")
@@ -187,7 +343,8 @@ def safe_upload(client, file_path, mime_type):
         
         # Upload the temp file
         print(f"  (Uploading safe copy: {temp_path})...")
-        uploaded_file = client.files.upload(
+        retry_upload = retry_gemini_request(client.files.upload)
+        uploaded_file = retry_upload(
             file=temp_path,
             config=types.UploadFileConfig(mime_type=mime_type)
         )
@@ -196,3 +353,81 @@ def safe_upload(client, file_path, mime_type):
         # cleanup temp file
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+def generate_content(provider, model, prompt, response_mime_type=None, temperature=0.1):
+    """
+    Generate text content via configured provider.
+
+    Args:
+        provider (str): "gemini" or "openrouter"
+        model (str): model identifier for the selected provider
+        prompt (str): text prompt
+        response_mime_type (str): Optional MIME type for response (Gemini only)
+        temperature (float): Sampling temperature
+
+    Returns:
+        str: model response text
+    """
+    provider_key = (provider or "gemini").strip().lower()
+
+    if provider_key == "gemini":
+        if genai is None:
+            raise ImportError("google-genai package not found. Install with `pip install google-genai`.")
+        api_key = get_gemini_api_key()
+        client = genai.Client(api_key=api_key)
+        
+        config = None
+        if response_mime_type or temperature != 0.1:
+            config = types.GenerateContentConfig(
+                response_mime_type=response_mime_type,
+                temperature=temperature
+            )
+            
+        retry_gen = retry_gemini_request(client.models.generate_content)
+        response = retry_gen(model=model, contents=prompt, config=config)
+        
+        # Track cost
+        calculate_gemini_cost(response)
+        
+        return (getattr(response, "text", "") or "").strip()
+
+    if provider_key == "openrouter":
+        api_key = get_openrouter_api_key()
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+        }
+        
+        request = urllib.request.Request(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://localhost",
+                "X-Title": "VideoCleaner",
+            },
+            method="POST",
+        )
+        
+        def _make_request():
+            with urllib.request.urlopen(request, timeout=120) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            
+            if "error" in body:
+                raise Exception(f"OpenRouter API Error: {body['error']}")
+                
+            return (
+                body.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+
+        # Reuse the retry decorator pattern for OpenRouter as well
+        retry_openrouter = retry_gemini_request(_make_request)
+        return retry_openrouter()
+
+    raise ValueError(f"Unsupported provider: {provider}")
