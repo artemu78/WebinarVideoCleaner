@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import http.client
 from unittest.mock import patch, mock_open, MagicMock
 
 # Add parent directory to path to import modules
@@ -176,6 +177,27 @@ class TestCommonUtils(unittest.TestCase):
         args, kwargs = mock_urlopen.call_args
         request = args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer or_test_key")
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    @patch("common_utils.time.sleep")
+    @patch("common_utils.timed_input")
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter_retries_truncated_response_without_prompting(
+        self, mock_urlopen, mock_timed_input, mock_sleep
+    ):
+        mock_urlopen.side_effect = http.client.IncompleteRead(b'{"partial": true}')
+        mock_timed_input.side_effect = AssertionError("OpenRouter retries must not prompt for input")
+
+        with self.assertRaisesRegex(RuntimeError, "OpenRouter request failed after 3 attempts"):
+            common_utils.generate_content(
+                provider="openrouter",
+                model="openai/gpt-4o-mini",
+                prompt="translate me",
+            )
+
+        self.assertEqual(mock_urlopen.call_count, 3)
+        mock_timed_input.assert_not_called()
+        self.assertEqual(mock_sleep.call_count, 2)
 
 if __name__ == '__main__':
     unittest.main()

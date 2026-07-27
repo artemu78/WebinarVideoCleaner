@@ -325,6 +325,29 @@ def retry_gemini_request(func):
                 print("Retrying...")
     return wrapper
 
+
+def retry_openrouter_request(func, attempts=3, initial_delay_seconds=1.0):
+    """Retry OpenRouter transport failures without blocking for terminal input."""
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return func()
+        except Exception as error:
+            last_error = error
+            if attempt == attempts:
+                break
+
+            delay = initial_delay_seconds * (2 ** (attempt - 1))
+            print(
+                f"[OpenRouter request failed] Attempt {attempt}/{attempts}: {error}. "
+                f"Retrying automatically in {delay:.0f} second(s)..."
+            )
+            time.sleep(delay)
+
+    raise RuntimeError(
+        f"OpenRouter request failed after {attempts} attempts: {last_error}"
+    ) from last_error
+
 def safe_upload(client, file_path, mime_type):
     """
     Uploads a file to Gemini using a safe temporary ASCII filename to avoid Unicode errors.
@@ -426,8 +449,6 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
                 .strip()
             )
 
-        # Reuse the retry decorator pattern for OpenRouter as well
-        retry_openrouter = retry_gemini_request(_make_request)
-        return retry_openrouter()
+        return retry_openrouter_request(_make_request)
 
     raise ValueError(f"Unsupported provider: {provider}")

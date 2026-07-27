@@ -19,7 +19,9 @@ from common_utils import (
 load_dotenv()
 correct_srt_errors_model = os.environ.get("CORRECT_SRT_ERRORS_MODEL", "gemini-3-flash-preview")
 correct_srt_errors_openrouter_model = os.environ.get("CORRECT_SRT_ERRORS_OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
-OPENROUTER_CORRECTION_BATCH_SIZE = 400
+# Large JSON-only responses from free OpenRouter routes are more likely to be
+# truncated. Keep batches small enough that their corrected JSON fits reliably.
+OPENROUTER_CORRECTION_BATCH_SIZE = int(os.environ.get("OPENROUTER_CORRECTION_BATCH_SIZE", "100"))
 
 
 def _parse_correction_json_array(text):
