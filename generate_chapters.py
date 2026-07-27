@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload, retry_gemini_request
 
 load_dotenv()
-generate_chapters_model = "gemini-3-flash-preview"
-generate_chapters_openrouter_model = "google/gemini-2.5-flash"
+generate_chapters_model = os.getenv("GENERATE_CHAPTERS_MODEL", "gemini-2.5-flash-preview-05-20")
+generate_chapters_openrouter_model = os.getenv("GENERATE_CHAPTERS_OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
 # Check if google.genai is available
 try:
@@ -187,6 +187,21 @@ if __name__ == "__main__":
     srt_file = input("Enter the path to the Corrected SRT file: ").strip()
     language = input("Enter the language of the SRT file: ").strip()
     webinar_topic = input("Enter the topic of the webinar: ").strip()
+    output_mode = input("Output type [chapters/qa_timeline] (chapters): ").strip().lower() or "chapters"
+    provider = input("AI provider [gemini/openrouter] (gemini): ").strip().lower() or "gemini"
+
+    if output_mode not in {"chapters", "qa_timeline"}:
+        print("Error: Output type must be 'chapters' or 'qa_timeline'.")
+        exit(1)
+
+    if provider not in {"gemini", "openrouter"}:
+        print("Error: AI provider must be 'gemini' or 'openrouter'.")
+        exit(1)
+
+    default_model = (
+        generate_chapters_openrouter_model if provider == "openrouter" else generate_chapters_model
+    )
+    model = input(f"Model ({default_model}): ").strip() or None
 
     # Remove quotes
     if srt_file.startswith('"') and srt_file.endswith('"'):
@@ -201,7 +216,14 @@ if __name__ == "__main__":
     if os.path.exists(srt_file):
         start_time = time.time()
         print(f"\nGenerating chapters for: {srt_file}\n")
-        output_file = generate_chapters(srt_file, language, webinar_topic)
+        output_file = generate_chapters(
+            srt_file,
+            language,
+            webinar_topic,
+            output_mode=output_mode,
+            provider=provider,
+            model=model,
+        )
         if output_file:
             print(f"\nOutput file: {output_file}")
             
