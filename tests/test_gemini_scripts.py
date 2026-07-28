@@ -2,6 +2,7 @@ import unittest
 import sys
 import os
 import importlib
+import urllib.error
 from unittest.mock import patch, MagicMock, mock_open
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,13 +58,20 @@ class TestAIScripts(unittest.TestCase):
     @patch("os.path.exists")
     def test_audio_cleaner_process_openrouter(self, mock_exists, mock_gen):
         import audio_cleaner
-        mock_exists.side_effect = lambda p: "gemini_response" not in p
-        mock_gen.return_value = '{"ranges_to_delete": []}'
-        
-        with patch("builtins.open", mock_open(read_data="SRT content")):
-            output = audio_cleaner.process_srt_file("test.srt", provider="openrouter")
-            self.assertIn("gemini_response.txt", output)
-            mock_gen.assert_called_once()
+        with patch.dict(
+            os.environ,
+            {"AUDIO_CLEANER_OPENROUTER_INFERENCE_PROVIDER": "deepinfra"},
+            clear=False,
+        ):
+            importlib.reload(audio_cleaner)
+            mock_exists.side_effect = lambda p: "gemini_response" not in p
+            mock_gen.return_value = '{"ranges_to_delete": []}'
+
+            with patch("builtins.open", mock_open(read_data="SRT content")):
+                output = audio_cleaner.process_srt_file("test.srt", provider="openrouter")
+        self.assertIn("gemini_response.txt", output)
+        mock_gen.assert_called_once()
+        self.assertEqual(mock_gen.call_args.kwargs["inference_provider"], "deepinfra")
 
     @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
@@ -94,16 +102,95 @@ class TestAIScripts(unittest.TestCase):
     @patch("os.path.exists")
     def test_correct_transcription_openrouter(self, mock_exists, mock_gen):
         import correct_srt_errors
-        importlib.reload(correct_srt_errors)
+        with patch.dict(
+            os.environ,
+            {"CORRECT_SRT_ERRORS_OPENROUTER_INFERENCE_PROVIDER": "baidu/fp8"},
+            clear=False,
+        ):
+            importlib.reload(correct_srt_errors)
 
+            mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+            mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
+            with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+                output = correct_srt_errors.process_srt_correction(
+                    "test.srt", language="ru", provider="openrouter"
+                )
+        self.assertIn("_corrected_by_openrouter.srt", output)
+        mock_gen.assert_called()
+        self.assertEqual(mock_gen.call_args.kwargs["inference_provider"], "baidu/fp8")
+
+    @patch("common_utils.generate_content", return_value='[{"id": "1", "text": "Fixed"}]')
+    @patch("os.path.exists")
+    def test_correct_transcription_does_not_pin_provider_for_another_model(self, mock_exists, mock_gen):
+        import correct_srt_errors
+        with patch.dict(
+            os.environ,
+            {"CORRECT_SRT_ERRORS_OPENROUTER_INFERENCE_PROVIDER": "baidu/fp8"},
+            clear=False,
+        ):
+            importlib.reload(correct_srt_errors)
+            mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+            mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
+            with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+                correct_srt_errors.process_srt_correction(
+                    "test.srt",
+                    language="ru",
+                    provider="openrouter",
+                    correction_model="google/gemini-2.5-flash",
+                )
+
+        self.assertIsNone(mock_gen.call_args.kwargs["inference_provider"])
+
+    @patch("os.path.exists")
+    def test_correct_transcription_stops_on_openrouter_forbidden(self, mock_exists):
+        import correct_srt_errors
+        importlib.reload(correct_srt_errors)
         mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
         mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nOriginal text\n\n"
-        with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+
+        with (
+            patch("builtins.open", mock_open(read_data=mock_srt_content)),
+            patch.object(
+                correct_srt_errors,
+                "generate_content",
+                side_effect=urllib.error.HTTPError("https://openrouter.ai", 403, "Forbidden", None, None),
+            ) as mock_gen,
+            patch.object(correct_srt_errors, "write_srt") as mock_write,
+        ):
             output = correct_srt_errors.process_srt_correction(
                 "test.srt", language="ru", provider="openrouter"
             )
-        self.assertIn("_corrected_by_openrouter.srt", output)
-        mock_gen.assert_called()
+
+        self.assertIsNone(output)
+        mock_gen.assert_called_once()
+        mock_write.assert_not_called()
+
+    @patch("os.path.exists")
+    def test_correct_transcription_does_not_write_when_all_batches_fail(self, mock_exists):
+        import correct_srt_errors
+        importlib.reload(correct_srt_errors)
+        mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+        mock_srt_content = "\n\n".join(
+            f"{index}\n00:01:00,000 --> 00:01:02,000\nOriginal text {index}"
+            for index in range(1, 102)
+        )
+
+        with (
+            patch("builtins.open", mock_open(read_data=mock_srt_content)),
+            patch.object(
+                correct_srt_errors,
+                "generate_content",
+                side_effect=RuntimeError("OpenRouter request failed after 3 attempts"),
+            ) as mock_gen,
+            patch.object(correct_srt_errors, "write_srt") as mock_write,
+        ):
+            output = correct_srt_errors.process_srt_correction(
+                "test.srt", language="ru", provider="openrouter"
+            )
+
+        self.assertIsNone(output)
+        self.assertEqual(mock_gen.call_count, 2)
+        mock_write.assert_not_called()
 
     @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
@@ -133,14 +220,20 @@ class TestAIScripts(unittest.TestCase):
     @patch("os.path.exists")
     def test_generate_chapters_process_openrouter(self, mock_exists, mock_gen):
         import generate_chapters
-        importlib.reload(generate_chapters)
-        mock_exists.side_effect = lambda p: "_chapters.txt" not in p
-        mock_gen.return_value = "00:00:00 - Intro"
-        
-        with patch("builtins.open", mock_open(read_data="SRT content")):
-            output = generate_chapters.generate_chapters("test.srt", provider="openrouter")
-            self.assertIn("_chapters.txt", output)
-            mock_gen.assert_called_once()
+        with patch.dict(
+            os.environ,
+            {"GENERATE_CHAPTERS_OPENROUTER_INFERENCE_PROVIDER": "deepinfra"},
+            clear=False,
+        ):
+            importlib.reload(generate_chapters)
+            mock_exists.side_effect = lambda p: "_chapters.txt" not in p
+            mock_gen.return_value = "00:00:00 - Intro"
+
+            with patch("builtins.open", mock_open(read_data="SRT content")):
+                output = generate_chapters.generate_chapters("test.srt", provider="openrouter")
+        self.assertIn("_chapters.txt", output)
+        mock_gen.assert_called_once()
+        self.assertEqual(mock_gen.call_args.kwargs["inference_provider"], "deepinfra")
 
     @patch("common_utils.get_gemini_api_key", return_value="fake_key")
     @patch("common_utils.calculate_gemini_cost", return_value=(0.0001, 100, 50))
@@ -174,15 +267,21 @@ class TestAIScripts(unittest.TestCase):
     @patch("os.path.exists")
     def test_generate_delivery_metrics_process_openrouter(self, mock_exists, mock_gen):
         import delivery_metrics
-        importlib.reload(delivery_metrics)
-        mock_exists.side_effect = lambda p: "_delivery_metrics.html" not in p
-        mock_gen.return_value = "<h1>Report</h1>"
-        
-        mock_srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n"
-        with patch("builtins.open", mock_open(read_data=mock_srt_content)):
-            output = delivery_metrics.generate_delivery_metrics("test.srt", "test_chapters.txt", provider="openrouter")
-            self.assertIsNotNone(output)
-            self.assertIn("_delivery_metrics.html", output)
-            mock_gen.assert_called_once()
+        with patch.dict(
+            os.environ,
+            {"DELIVERY_METRICS_OPENROUTER_INFERENCE_PROVIDER": "deepinfra"},
+            clear=False,
+        ):
+            importlib.reload(delivery_metrics)
+            mock_exists.side_effect = lambda p: "_delivery_metrics.html" not in p
+            mock_gen.return_value = "<h1>Report</h1>"
+
+            mock_srt_content = "1\n00:00:01,000 --> 00:00:02,000\nHello\n\n"
+            with patch("builtins.open", mock_open(read_data=mock_srt_content)):
+                output = delivery_metrics.generate_delivery_metrics("test.srt", "test_chapters.txt", provider="openrouter")
+        self.assertIsNotNone(output)
+        self.assertIn("_delivery_metrics.html", output)
+        mock_gen.assert_called_once()
+        self.assertEqual(mock_gen.call_args.kwargs["inference_provider"], "deepinfra")
 if __name__ == '__main__':
     unittest.main()

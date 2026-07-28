@@ -3,6 +3,7 @@ import os
 import time
 import json
 import re
+import urllib.error
 from dotenv import load_dotenv
 from common_utils import (
     get_api_key,
@@ -19,6 +20,9 @@ from common_utils import (
 load_dotenv()
 correct_srt_errors_model = os.environ.get("CORRECT_SRT_ERRORS_MODEL", "gemini-3-flash-preview")
 correct_srt_errors_openrouter_model = os.environ.get("CORRECT_SRT_ERRORS_OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
+correct_srt_errors_openrouter_inference_provider = os.environ.get(
+    "CORRECT_SRT_ERRORS_OPENROUTER_INFERENCE_PROVIDER", ""
+).strip()
 # Large JSON-only responses from free OpenRouter routes are more likely to be
 # truncated. Keep batches small enough that their corrected JSON fits reliably.
 OPENROUTER_CORRECTION_BATCH_SIZE = int(os.environ.get("OPENROUTER_CORRECTION_BATCH_SIZE", "100"))
@@ -115,6 +119,11 @@ def process_srt_correction(
     model = correction_model or (
         correct_srt_errors_openrouter_model if provider == "openrouter" else correct_srt_errors_model
     )
+    inference_provider = (
+        correct_srt_errors_openrouter_inference_provider
+        if provider == "openrouter" and model == correct_srt_errors_openrouter_model
+        else None
+    )
 
     base, ext = os.path.splitext(srt_path)
     out_suffix = _correction_output_suffix(provider)
@@ -143,6 +152,7 @@ def process_srt_correction(
     print(f"Split into {len(batches)} batches for processing (Provider: {provider}, Batch Size: {batch_size}).")
 
     corrected_map = {}
+    successful_batches = 0
     
     for i, batch in enumerate(batches):
         print(f"\nProcessing Batch {i+1}/{len(batches)} ({len(batch)} items)...")
@@ -162,7 +172,8 @@ def process_srt_correction(
                 provider=provider, 
                 model=model, 
                 prompt=prompt,
-                response_mime_type="application/json" if provider == "gemini" else None
+                response_mime_type="application/json" if provider == "gemini" else None,
+                inference_provider=inference_provider,
             )
             
             batch_corrected = _parse_correction_json_array(raw)
@@ -172,10 +183,21 @@ def process_srt_correction(
                 
             for item in batch_corrected:
                 corrected_map[item["id"]] = item["text"]
+            successful_batches += 1
             print(f"  ✓ Batch {i+1} Success.")
             
+        except urllib.error.HTTPError as error:
+            print(
+                f"  ❌ OpenRouter rejected batch {i+1} with HTTP {error.code}. "
+                "Stopping Step 2; no corrected file will be created."
+            )
+            return None
         except Exception as e:
             print(f"  ❌ Error in batch {i+1}: {e}")
+
+    if successful_batches == 0:
+        print("❌ No batches were corrected. Step 2 stopped; no corrected file was created.")
+        return None
 
     correction_count = 0
     for block in original_blocks:

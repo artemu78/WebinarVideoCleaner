@@ -13,8 +13,18 @@ import time
 import subprocess
 from datetime import timedelta
 import re
+from dotenv import load_dotenv
 
 from common_utils import get_tracked_user_input_seconds, timed_input, track_user_input_time_scope
+
+load_dotenv()
+translate_srt_model = os.getenv("TRANSLATE_SRT_MODEL", "gemini-3.1-flash-lite-preview")
+translate_srt_openrouter_model = os.getenv(
+    "TRANSLATE_SRT_OPENROUTER_MODEL", "google/gemini-3-flash-preview"
+)
+translate_srt_openrouter_inference_provider = os.getenv(
+    "TRANSLATE_SRT_OPENROUTER_INFERENCE_PROVIDER", ""
+).strip()
 
 def natural_sort_key(s):
     return [int(text) if text.isdigit() else text.lower()
@@ -88,8 +98,16 @@ def translate_srt(srt_content, target_language, provider="gemini", api_key=None,
     translated_blocks = []
     
     selected_provider = (provider or "gemini").strip().lower()
-    # Use flash models for speed and cost efficiency
-    model = "gemini-3.1-flash-lite-preview" if selected_provider == "gemini" else "google/gemini-3-flash-preview"
+    model = (
+        translate_srt_openrouter_model
+        if selected_provider == "openrouter"
+        else translate_srt_model
+    )
+    inference_provider = (
+        translate_srt_openrouter_inference_provider
+        if selected_provider == "openrouter" and model == translate_srt_openrouter_model
+        else None
+    )
     
     print(f"Translating {len(original_blocks)} blocks in chunks of {chunk_size} via {selected_provider} ({model})...")
 
@@ -119,7 +137,12 @@ def translate_srt(srt_content, target_language, provider="gemini", api_key=None,
         )
         
         try:
-            raw_text = generate_content(provider=selected_provider, model=model, prompt=prompt)
+            raw_text = generate_content(
+                provider=selected_provider,
+                model=model,
+                prompt=prompt,
+                inference_provider=inference_provider,
+            )
             batch_translated = parse_json_array(raw_text)
             
             if batch_translated and len(batch_translated) > 0:

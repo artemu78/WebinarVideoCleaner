@@ -7,8 +7,11 @@ from dotenv import load_dotenv
 from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_cost, format_ms_to_srt, safe_upload, parse_time_to_ms, retry_gemini_request
 
 load_dotenv()
-delivery_metrics_model = "gemini-3-flash-preview"
-delivery_metrics_openrouter_model = "google/gemini-2.5-flash"
+delivery_metrics_model = os.getenv("DELIVERY_METRICS_MODEL", "gemini-3-flash-preview")
+delivery_metrics_openrouter_model = os.getenv("DELIVERY_METRICS_OPENROUTER_MODEL", "google/gemini-2.5-flash")
+delivery_metrics_openrouter_inference_provider = os.getenv(
+    "DELIVERY_METRICS_OPENROUTER_INFERENCE_PROVIDER", ""
+).strip()
 
 # Check if google.genai is available
 try:
@@ -115,6 +118,11 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
     """
     provider = (provider or "gemini").strip().lower()
     model = model or (delivery_metrics_openrouter_model if provider == "openrouter" else delivery_metrics_model)
+    inference_provider = (
+        delivery_metrics_openrouter_inference_provider
+        if provider == "openrouter" and model == delivery_metrics_openrouter_model
+        else None
+    )
 
     # Determine output path early to check if it already exists
     base_path = os.path.splitext(srt_path)[0]
@@ -206,7 +214,12 @@ def generate_delivery_metrics(srt_path, chapters_path, language="en", webinar_to
         prompt = f"{prompt_base}\n\nInput SRT content:\n{srt_content}"
         from common_utils import generate_content
         try:
-            report_body = generate_content(provider="openrouter", model=model, prompt=prompt)
+            report_body = generate_content(
+                provider="openrouter",
+                model=model,
+                prompt=prompt,
+                inference_provider=inference_provider,
+            )
         except Exception as e:
             print(f"\n❌ Error calling OpenRouter: {e}")
             return None

@@ -7,6 +7,9 @@ from common_utils import get_api_key, calculate_gemini_cost, get_total_gemini_co
 load_dotenv()
 generate_chapters_model = os.getenv("GENERATE_CHAPTERS_MODEL", "gemini-2.5-flash-preview-05-20")
 generate_chapters_openrouter_model = os.getenv("GENERATE_CHAPTERS_OPENROUTER_MODEL", "google/gemini-2.5-flash")
+generate_chapters_openrouter_inference_provider = os.getenv(
+    "GENERATE_CHAPTERS_OPENROUTER_INFERENCE_PROVIDER", ""
+).strip()
 
 # Check if google.genai is available
 try:
@@ -88,6 +91,11 @@ def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="
     """Upload SRT file to Gemini or send text to OpenRouter to get chapters or Q/A timeline."""
     provider = (provider or "gemini").strip().lower()
     model = model or (generate_chapters_openrouter_model if provider == "openrouter" else generate_chapters_model)
+    inference_provider = (
+        generate_chapters_openrouter_inference_provider
+        if provider == "openrouter" and model == generate_chapters_openrouter_model
+        else None
+    )
 
     if output_mode not in {"chapters", "qa_timeline"}:
         raise ValueError(f"Invalid output_mode: {output_mode}")
@@ -122,7 +130,12 @@ def generate_chapters(srt_path, language=None, webinar_topic=None, output_mode="
         prompt = f"{prompt_base}\n\nInput SRT content:\n{srt_content}"
         from common_utils import generate_content
         try:
-            response_text = generate_content(provider="openrouter", model=model, prompt=prompt)
+            response_text = generate_content(
+                provider="openrouter",
+                model=model,
+                prompt=prompt,
+                inference_provider=inference_provider,
+            )
         except Exception as e:
             print(f"\n❌ Error calling OpenRouter: {e}")
             return None

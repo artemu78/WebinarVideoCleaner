@@ -3,6 +3,7 @@ import contextlib
 import os
 import time
 import json
+import urllib.error
 import urllib.request
 import re
 import shutil
@@ -262,7 +263,8 @@ def parse_json_array(text):
         # If it's not a valid JSON array, return None so the caller can handle it
         return None
 
-# Cost tracking
+# Cost tracking. The legacy name is kept because existing scripts and tests may
+# still reset or read it directly, but it now accumulates every AI provider.
 _TOTAL_GEMINI_COST = 0.0
 
 def calculate_gemini_cost(response):
@@ -303,9 +305,28 @@ def calculate_gemini_cost(response):
     return total_request_cost, input_tokens, output_tokens
 
 def get_total_gemini_cost():
-    """Returns the total accumulated Gemini cost."""
+    """Backward-compatible alias for the total accumulated AI cost."""
+    return get_total_ai_cost()
+
+def get_total_ai_cost():
+    """Returns the total accumulated cost across all AI providers."""
     global _TOTAL_GEMINI_COST
     return _TOTAL_GEMINI_COST
+
+def track_openrouter_cost(response_body):
+    """Add OpenRouter's reported request charge to the accumulated AI cost."""
+    global _TOTAL_GEMINI_COST
+
+    usage = response_body.get("usage") if isinstance(response_body, dict) else None
+    if not isinstance(usage, dict):
+        return 0.0
+
+    cost = usage.get("cost")
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0:
+        return 0.0
+
+    _TOTAL_GEMINI_COST += float(cost)
+    return float(cost)
 
 
 def retry_gemini_request(func):
@@ -327,13 +348,18 @@ def retry_gemini_request(func):
 
 
 def retry_openrouter_request(func, attempts=3, initial_delay_seconds=1.0):
-    """Retry OpenRouter transport failures without blocking for terminal input."""
+    """Retry transient OpenRouter transport failures without blocking for terminal input."""
     last_error = None
     for attempt in range(1, attempts + 1):
         try:
             return func()
         except Exception as error:
             last_error = error
+            # Authentication, authorization, and malformed-request failures will
+            # not be fixed by repeating the identical request.  Keep the HTTP
+            # error intact so callers can stop the whole operation.
+            if isinstance(error, urllib.error.HTTPError) and 400 <= error.code < 500 and error.code not in (408, 429):
+                raise
             if attempt == attempts:
                 break
 
@@ -378,7 +404,14 @@ def safe_upload(client, file_path, mime_type):
             os.remove(temp_path)
 
 
-def generate_content(provider, model, prompt, response_mime_type=None, temperature=0.1):
+def generate_content(
+    provider,
+    model,
+    prompt,
+    response_mime_type=None,
+    temperature=0.1,
+    inference_provider=None,
+):
     """
     Generate text content via configured provider.
 
@@ -388,6 +421,7 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
         prompt (str): text prompt
         response_mime_type (str): Optional MIME type for response (Gemini only)
         temperature (float): Sampling temperature
+        inference_provider (str): Optional OpenRouter inference provider for this request only.
 
     Returns:
         str: model response text
@@ -422,7 +456,7 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
         }
-        inference_provider = os.environ.get("OPENROUTER_INFERENCE_PROVIDER", "").strip()
+        inference_provider = (inference_provider or "").strip()
         if inference_provider:
             payload["provider"] = {"only": [inference_provider]}
         
@@ -450,6 +484,8 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
             raise RuntimeError("OpenRouter returned an invalid response body.")
         if "error" in body:
             raise RuntimeError(f"OpenRouter API Error: {body['error']}")
+
+        track_openrouter_cost(body)
 
         choices = body.get("choices")
         if not isinstance(choices, list) or not choices:

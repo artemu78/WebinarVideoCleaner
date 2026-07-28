@@ -35,6 +35,14 @@ except ImportError as e:
     sys.exit(1)
 
 
+def print_step_summary(step_number, start_time, start_cost):
+    """Print elapsed time and the AI cost accumulated during one workflow step."""
+    duration = time.time() - start_time
+    step_cost = common_utils.get_total_gemini_cost() - start_cost
+    print(f"Step {step_number} duration: {duration:.2f} seconds")
+    print(f"Step {step_number} AI cost: ${step_cost:.6f}")
+
+
 def extract_json_from_text(text):
     """
     Extract JSON object from text that might contain extra content.
@@ -229,7 +237,7 @@ def main():
     print()
     
     # Step 1: Get MP4 file from user
-    mp4_path = input("Enter the path to the MP4 file: ").strip()
+    mp4_path = input("1/9 Enter the path to the MP4 file: ").strip()
     
     # Remove quotes if user pasted a path with quotes
     if mp4_path.startswith('"') and mp4_path.endswith('"'):
@@ -251,30 +259,30 @@ def main():
         if response != 'y':
             return
     
-    print(f"\nProcessing MP4 file: {mp4_path}\n", flush=True)
+    print(f"Processing MP4 file: {mp4_path}", flush=True)
     
     # Ask for mode
-    print("Select Mode:")
+    print("\n2/9 Select Mode:")
     print("1. Full Video Cleaner (Transcribe + Cut + Chapters)")
     print("2. Transcription & Chapters Only (No Cut)")
-    mode_input = input("Enter choice (1/2, default 1): ").strip()
+    mode_input = (input("Enter choice (1/2, default 2): ").strip() or "2")
     no_cut_mode = (mode_input == '2')
 
     if no_cut_mode:
-        print("\nMode: Transcription & Chapters Only (No Cut)", flush=True)
+        print("Mode: Transcription & Chapters Only (No Cut)", flush=True)
     else:
-        print("\nMode: Full Video Cleaner", flush=True)
+        print("Mode: Full Video Cleaner", flush=True)
 
     # Ask for AI Provider
-    print("\nSelect AI Provider:")
+    print("\n3/9 Select AI Provider:")
     print("1. Google Gemini (default - using File API)")
     print("2. OpenRouter (using text-based prompts)")
-    provider_choice = input("Enter choice (1/2, default 1): ").strip()
+    provider_choice = (input("Enter choice (1/2, default 2): ").strip() or "2")
     provider = "openrouter" if provider_choice == "2" else "gemini"
     print(f"Selected Provider: {provider}")
 
     # Ask for webinar structure output in Step 8
-    print("\nSelect Outline Output:")
+    print("\n4/9 Select Outline Output:")
     print("1. Chapters")
     print("2. Q/A Timeline (question-answer blocks)")
     outline_choice = input("Enter choice (1/2, default 1): ").strip()
@@ -285,7 +293,7 @@ def main():
         print("Step 8 will generate chapters.")
 
     # Ask for Webinar Topic (Optional)
-    webinar_topic = input("Enter webinar topic (optional, press Enter to skip): ").strip()
+    webinar_topic = input("\n5/9 Enter webinar topic (optional, press Enter to skip): ").strip()
     if not webinar_topic:
         webinar_topic = None
     else:
@@ -295,7 +303,7 @@ def main():
     use_audio_for_analysis = False
     if not no_cut_mode and provider == "gemini":
         print("\nGemini Analysis Options:")
-        audio_choice = input("Use audio file to identify ranges to remove? (y/n, default n): ").strip().lower()
+        audio_choice = input("5.1/9 Use audio file to identify ranges to remove? (y/n, default n): ").strip().lower()
         if audio_choice == 'y':
             use_audio_for_analysis = True
             print("Audio file will be used for analysis (this may take longer to upload).")
@@ -303,12 +311,12 @@ def main():
             print("Using SRT only.")
 
     # Ask for Whisper Model
-    print("\nSelect Whisper Model:")
+    print("\n6/9 Select Whisper Model:")
     print("1. turbo (default - fast)")
     print("2. small")
     print("3. medium")
     print("4. large")
-    model_choice = input("Enter model choice (default 'turbo'): ").strip().lower()
+    model_choice =( input("Enter model choice (default 'turbo'): ").strip().lower() or "fast")
 
     if model_choice in ['2', 'small']:
         whisper_model = "small"
@@ -321,27 +329,30 @@ def main():
     print(f"Selected Whisper model: {whisper_model}")
 
     # Ask for Language
-    print("\nSelect Webinar Language:")
+    print("\n7/9 Select Webinar Language:")
     print(transcribe_to_srt.get_language_codes_help())
-    lang_input = input("Enter language code (e.g., 'en', 'ru') or press Enter for auto-detect: ").strip()
+    lang_input = (input("Enter language code e.g., 'en', 'ru' or type 'auto', (default ru): ").strip().lower() or "ru")
 
-    language = None
-    if lang_input:
-        language = lang_input.lower()
-        print(f"Selected language: {language}")
-    else:
+    if lang_input=="auto":
+        language = None
         print("Language: Auto-detect")
+    else:
+        language = lang_input
+        print(f"Selected language: {language}")
 
     # Ask for Keep Fillers
-    keep_fillers_input = input("\nKeep filler words (uh, um, ah...)? (y/n, default n): ").strip().lower()
+    keep_fillers_input = (input("\n8/9 Keep filler words (uh, um, ah...)? (y/n, default n): ").strip().lower() or "n")
     keep_fillers = (keep_fillers_input == 'y')
     if keep_fillers:
         print("Mode: Preserve filler words enabled.")
+    else:
+        print("Strip filler words")
 
     # Ask for Translation
-    translate_to = input("\nTranslate subtitles to another language? (e.g. en, ru, or leave empty for no): ").strip()
+    translate_to = input("\n9/9 Translate subtitles to another language? (e.g. en, ru, or leave empty for no): ").strip()
     if not translate_to:
         translate_to = None
+        print(f"No translation")
     else:
         print(f"Translation language set to: {translate_to}")
 
@@ -355,6 +366,7 @@ def main():
         start_time = time.perf_counter()
         # Step 1: Transcribe MP4 to SRT
         step_start_time = time.time()
+        step_start_cost = common_utils.get_total_gemini_cost()
         print("=" * 60)
         print("STEP 1: Transcribing MP4 to SRT")
         print("=" * 60)
@@ -383,7 +395,7 @@ def main():
                 return
             
             print(f"\n✓ Transcription complete: {srt_path}\n")
-            print(f"Step 1 duration: {time.time() - step_start_time:.2f} seconds")
+            print_step_summary(1, step_start_time, step_start_cost)
         except Exception as e:
             print(f"Error during transcription: {e}")
             import traceback
@@ -392,6 +404,7 @@ def main():
         
         # Step 2: Correct Transcription Errors
         step_start_time = time.time()
+        step_start_cost = common_utils.get_total_gemini_cost()
         print("=" * 60)
         print(f"STEP 2: Correcting Transcription Errors (Language: {detected_language}, Provider: {provider})")
         print("=" * 60)
@@ -422,12 +435,13 @@ def main():
             traceback.print_exc()
             print("Continuing with original SRT...")
         
-        print(f"Step 2 duration: {time.time() - step_start_time:.2f} seconds")
+        print_step_summary(2, step_start_time, step_start_cost)
         
         # Step 3, 4, 5, 6: Cut video workflow (Skipped if No Cut mode)
         if not no_cut_mode:
             # Step 3: Analyze SRT with AI
             step_start_time = time.time()
+            step_start_cost = common_utils.get_total_gemini_cost()
             print("=" * 60)
             print(f"STEP 3: Analyzing SRT with {provider}")
             print("=" * 60)
@@ -469,7 +483,7 @@ def main():
                     return
                 
                 print(f"\n✓ AI analysis complete: {gemini_response_path}\n")
-                print(f"Step 3 duration: {time.time() - step_start_time:.2f} seconds")
+                print_step_summary(3, step_start_time, step_start_cost)
             except Exception as e:
                 print(f"Error during AI analysis: {e}")
                 import traceback
@@ -478,6 +492,7 @@ def main():
             
             # Step 4: Convert response to cut format
             step_start_time = time.time()
+            step_start_cost = common_utils.get_total_gemini_cost()
             print("=" * 60)
             print("STEP 4: Converting AI response to cut format")
             print("=" * 60)
@@ -496,7 +511,7 @@ def main():
                     return
                 
                 print(f"\n✓ Conversion complete: {json_ranges_path}\n")
-                print(f"Step 4 duration: {time.time() - step_start_time:.2f} seconds")
+                print_step_summary(4, step_start_time, step_start_cost)
             except Exception as e:
                 print(f"Error during conversion: {e}")
                 import traceback
@@ -505,6 +520,7 @@ def main():
             
             # Step 5: Cut video
             step_start_time = time.time()
+            step_start_cost = common_utils.get_total_gemini_cost()
             print("=" * 60)
             print("STEP 5: Cutting video")
             print("=" * 60)
@@ -523,7 +539,7 @@ def main():
                     return
                 
                 print(f"\n✓ Video cutting complete: {output_video_path}\n")
-                print(f"Step 5 duration: {time.time() - step_start_time:.2f} seconds")
+                print_step_summary(5, step_start_time, step_start_cost)
             except Exception as e:
                 print(f"Error during video cutting: {e}")
                 import traceback
@@ -532,6 +548,7 @@ def main():
             
             # Step 6: Correct SRT timestamps
             step_start_time = time.time()
+            step_start_cost = common_utils.get_total_gemini_cost()
             print("=" * 60)
             print("STEP 6: Correcting SRT timestamps")
             print("=" * 60)
@@ -553,13 +570,16 @@ def main():
                 import traceback
                 traceback.print_exc()
                 corrected_srt_path = f"Error: {e}"
-            print(f"Step 6 duration: {time.time() - step_start_time:.2f} seconds")
+            print_step_summary(6, step_start_time, step_start_cost)
         else:
             print("\nSkipping Steps 3, 4, 5, 6 (Analysis & Cutting) due to No Cut mode selection.")
+            for skipped_step in range(3, 7):
+                print(f"Step {skipped_step} AI cost: $0.000000 (skipped)")
         
     
         # Step 7: Check SRT Alignment
         step_start_time = time.time()
+        step_start_cost = common_utils.get_total_gemini_cost()
         print("=" * 60)
         print("STEP 7: Checking SRT Alignment")
         print("=" * 60)
@@ -585,10 +605,11 @@ def main():
         else:
             print("Warning: No SRT file available to check.")
             
-        print(f"Step 7 duration: {time.time() - step_start_time:.2f} seconds")
+        print_step_summary(7, step_start_time, step_start_cost)
     
         # Step 8: Generate Chapters
         step_start_time = time.time()
+        step_start_cost = common_utils.get_total_gemini_cost()
         print("=" * 60)
         step_8_label = "Generating Q/A Timeline" if outline_mode == "qa_timeline" else "Generating Chapters"
         print(f"STEP 8: {step_8_label} (Provider: {provider})")
@@ -630,10 +651,11 @@ def main():
             print("Error: No valid SRT file available for chapter generation.")
             chapters_path = "No input SRT"
         
-        print(f"Step 8 duration: {time.time() - step_start_time:.2f} seconds")
+        print_step_summary(8, step_start_time, step_start_cost)
     
         # Step 9: Calculate Delivery Metrics
         step_start_time = time.time()
+        step_start_cost = common_utils.get_total_gemini_cost()
         print("=" * 60)
         print(f"STEP 9: Calculating Delivery Metrics (Provider: {provider})")
         print("=" * 60)
@@ -664,7 +686,7 @@ def main():
             print("Warning: Missing SRT or Chapters for delivery metrics calculation.")
             metrics_path = "Missing input files"
         
-        print(f"Step 9 duration: {time.time() - step_start_time:.2f} seconds")
+        print_step_summary(9, step_start_time, step_start_cost)
     
         # Summary
         elapsed_time = time.perf_counter() - start_time - common_utils.get_tracked_user_input_seconds()

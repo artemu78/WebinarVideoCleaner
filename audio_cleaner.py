@@ -5,8 +5,11 @@ from dotenv import load_dotenv
 from common_utils import get_api_key, calculate_gemini_cost, safe_upload, retry_gemini_request
 
 load_dotenv()
-audio_cleaner_model = "gemini-3-flash-preview"
-audio_cleaner_openrouter_model = "google/gemini-2.5-flash"
+audio_cleaner_model = os.getenv("AUDIO_CLEANER_MODEL", "gemini-3-flash-preview")
+audio_cleaner_openrouter_model = os.getenv("AUDIO_CLEANER_OPENROUTER_MODEL", "google/gemini-2.5-flash")
+audio_cleaner_openrouter_inference_provider = os.getenv(
+    "AUDIO_CLEANER_OPENROUTER_INFERENCE_PROVIDER", ""
+).strip()
 
 # Check if google.genai is available
 try:
@@ -22,6 +25,11 @@ def process_srt_file(srt_path, audio_path=None, keep_fillers=False, provider="ge
     """Upload SRT file (and optional audio) to Gemini or send text to OpenRouter."""
     provider = (provider or "gemini").strip().lower()
     model = model or (audio_cleaner_openrouter_model if provider == "openrouter" else audio_cleaner_model)
+    inference_provider = (
+        audio_cleaner_openrouter_inference_provider
+        if provider == "openrouter" and model == audio_cleaner_openrouter_model
+        else None
+    )
     
     # Determine output path early to check if it already exists
     output_filename = os.path.splitext(srt_path)[0] + "_gemini_response.txt"
@@ -67,7 +75,12 @@ def process_srt_file(srt_path, audio_path=None, keep_fillers=False, provider="ge
         """
         from common_utils import generate_content
         try:
-            response_text = generate_content(provider="openrouter", model=model, prompt=prompt)
+            response_text = generate_content(
+                provider="openrouter",
+                model=model,
+                prompt=prompt,
+                inference_provider=inference_provider,
+            )
             if not response_text:
                 print("Error: Empty response from OpenRouter")
                 return None

@@ -35,6 +35,19 @@ class TestMainVideoEditor(unittest.TestCase):
         self.assertEqual(convert_timestamp_format("00:01:02"), "00:01:02")
         self.assertEqual(convert_timestamp_format("00:01:02,123"), "00:01:02")
 
+    @patch("builtins.print")
+    @patch("main_video_editor.common_utils.get_total_gemini_cost", return_value=0.012345)
+    @patch("main_video_editor.time.time", return_value=12.5)
+    def test_print_step_summary_includes_cost_delta(
+        self, mock_time, mock_total_cost, mock_print
+    ):
+        from main_video_editor import print_step_summary
+
+        print_step_summary(2, start_time=10.0, start_cost=0.002345)
+
+        mock_print.assert_any_call("Step 2 duration: 2.50 seconds")
+        mock_print.assert_any_call("Step 2 AI cost: $0.010000")
+
     def test_convert_gemini_response_to_cut_format(self):
         from main_video_editor import convert_gemini_response_to_cut_format
         gemini_content = '{"ranges_to_delete": [{"start": "00:00:01,000", "end": "00:00:02,000"}]}'

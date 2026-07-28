@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import http.client
+import urllib.error
 from unittest.mock import patch, mock_open, MagicMock
 
 # Add parent directory to path to import modules
@@ -163,7 +164,11 @@ class TestCommonUtils(unittest.TestCase):
     @patch("common_utils.urllib.request.urlopen")
     def test_generate_content_openrouter(self, mock_urlopen):
         mock_response = MagicMock()
-        mock_response.read.return_value = b'{"choices":[{"message":{"content":"hello from openrouter"}}]}'
+        mock_response.read.return_value = (
+            b'{"choices":[{"message":{"content":"hello from openrouter"}}],'
+            b'"usage":{"prompt_tokens":1000,"completion_tokens":500,'
+            b'"total_tokens":1500,"cost":0.012345}}'
+        )
         mock_urlopen.return_value.__enter__.return_value = mock_response
 
         response_text = common_utils.generate_content(
@@ -173,6 +178,7 @@ class TestCommonUtils(unittest.TestCase):
         )
 
         self.assertEqual(response_text, "hello from openrouter")
+        self.assertAlmostEqual(get_total_gemini_cost(), 0.012345)
         self.assertTrue(mock_urlopen.called)
         # Verify that it was called with the right headers
         args, kwargs = mock_urlopen.call_args
@@ -214,7 +220,7 @@ class TestCommonUtils(unittest.TestCase):
         clear=True,
     )
     @patch("common_utils.urllib.request.urlopen")
-    def test_generate_content_openrouter_uses_configured_inference_provider(self, mock_urlopen):
+    def test_generate_content_openrouter_ignores_global_inference_provider(self, mock_urlopen):
         mock_response = MagicMock()
         mock_response.read.return_value = b'{"choices":[{"message":{"content":"hello"}}]}'
         mock_urlopen.return_value.__enter__.return_value = mock_response
@@ -223,6 +229,24 @@ class TestCommonUtils(unittest.TestCase):
             provider="openrouter",
             model="openai/gpt-4o-mini",
             prompt="translate me",
+        )
+
+        request = mock_urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertNotIn("provider", payload)
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter_uses_explicit_inference_provider(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"choices":[{"message":{"content":"hello"}}]}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        common_utils.generate_content(
+            provider="openrouter",
+            model="openai/gpt-4o-mini",
+            prompt="translate me",
+            inference_provider="  deepinfra  ",
         )
 
         request = mock_urlopen.call_args.args[0]
@@ -249,6 +273,27 @@ class TestCommonUtils(unittest.TestCase):
         self.assertEqual(mock_urlopen.call_count, 3)
         mock_timed_input.assert_not_called()
         self.assertEqual(mock_sleep.call_count, 2)
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    @patch("common_utils.time.sleep")
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter_does_not_retry_forbidden_response(
+        self, mock_urlopen, mock_sleep
+    ):
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://openrouter.ai/api/v1/chat/completions", 403, "Forbidden", None, None
+        )
+
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            common_utils.generate_content(
+                provider="openrouter",
+                model="example/model",
+                prompt="translate me",
+            )
+
+        self.assertEqual(raised.exception.code, 403)
+        mock_urlopen.assert_called_once()
+        mock_sleep.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()
