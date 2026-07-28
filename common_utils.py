@@ -422,6 +422,9 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
             "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
         }
+        inference_provider = os.environ.get("OPENROUTER_INFERENCE_PROVIDER", "").strip()
+        if inference_provider:
+            payload["provider"] = {"only": [inference_provider]}
         
         request = urllib.request.Request(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -437,18 +440,36 @@ def generate_content(provider, model, prompt, response_mime_type=None, temperatu
         
         def _make_request():
             with urllib.request.urlopen(request, timeout=120) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            
-            if "error" in body:
-                raise Exception(f"OpenRouter API Error: {body['error']}")
-                
-            return (
-                body.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
+                return json.loads(response.read().decode("utf-8"))
+
+        # Retry transport failures only. A completed response with no usable final
+        # message will not become valid by submitting the same prompt again.
+        body = retry_openrouter_request(_make_request)
+
+        if not isinstance(body, dict):
+            raise RuntimeError("OpenRouter returned an invalid response body.")
+        if "error" in body:
+            raise RuntimeError(f"OpenRouter API Error: {body['error']}")
+
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("OpenRouter returned no completion choices.")
+
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            raise RuntimeError("OpenRouter returned an invalid completion choice.")
+
+        message = choice.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            finish_reason = choice.get("finish_reason", "unknown")
+            response_model = body.get("model", model)
+            raise RuntimeError(
+                "OpenRouter returned no final message content "
+                f"(model={response_model!r}, finish_reason={finish_reason!r}). "
+                "The model or provider may have returned reasoning only or rejected the request."
             )
 
-        return retry_openrouter_request(_make_request)
+        return content.strip()
 
     raise ValueError(f"Unsupported provider: {provider}")

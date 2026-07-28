@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import json
 import http.client
 from unittest.mock import patch, mock_open, MagicMock
 
@@ -177,6 +178,56 @@ class TestCommonUtils(unittest.TestCase):
         args, kwargs = mock_urlopen.call_args
         request = args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer or_test_key")
+
+    @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
+    @patch("common_utils.time.sleep")
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter_reports_null_message_content_without_retrying(
+        self, mock_urlopen, mock_sleep
+    ):
+        mock_response = MagicMock()
+        mock_response.read.return_value = (
+            b'{"model":"example/model","choices":[{"message":{"content":null},'
+            b'"finish_reason":"stop"}]}'
+        )
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "OpenRouter returned no final message content.*finish_reason='stop'",
+        ):
+            common_utils.generate_content(
+                provider="openrouter",
+                model="example/model",
+                prompt="translate me",
+            )
+
+        mock_urlopen.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @patch.dict(
+        os.environ,
+        {
+            "OPENROUTER_API_KEY": "or_test_key",
+            "OPENROUTER_INFERENCE_PROVIDER": "  deepinfra  ",
+        },
+        clear=True,
+    )
+    @patch("common_utils.urllib.request.urlopen")
+    def test_generate_content_openrouter_uses_configured_inference_provider(self, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.read.return_value = b'{"choices":[{"message":{"content":"hello"}}]}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        common_utils.generate_content(
+            provider="openrouter",
+            model="openai/gpt-4o-mini",
+            prompt="translate me",
+        )
+
+        request = mock_urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["provider"], {"only": ["deepinfra"]})
 
     @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
     @patch("common_utils.time.sleep")
