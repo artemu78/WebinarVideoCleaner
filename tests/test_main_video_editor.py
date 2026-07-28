@@ -2,6 +2,7 @@ import unittest
 import sys
 import os
 import json
+import tempfile
 from unittest.mock import patch, mock_open, MagicMock, ANY
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -53,6 +54,70 @@ class TestMainVideoEditor(unittest.TestCase):
 
         mock_print.assert_any_call("Step 2 duration: 00:00:02.50")
         mock_print.assert_any_call("Step 2 AI cost: $0.010000")
+
+    def test_run_with_log_captures_stdout_and_stderr(self):
+        from main_video_editor import run_with_log
+
+        with tempfile.TemporaryDirectory() as log_dir, patch(
+            "main_video_editor.main"
+        ) as mock_main:
+            mock_main.side_effect = lambda: (
+                print("workflow result"),
+                print("workflow warning", file=sys.stderr),
+            )
+
+            log_path = run_with_log(log_dir)
+
+            self.assertTrue(os.path.exists(log_path))
+            with open(log_path, encoding="utf-8") as log_file:
+                log_text = log_file.read()
+
+        self.assertIn("workflow result", log_text)
+        self.assertIn("workflow warning", log_text)
+        self.assertIn("Run log saved to:", log_text)
+
+    @patch("builtins.print")
+    def test_print_run_parameters_includes_openrouter_configuration(self, mock_print):
+        from main_video_editor import print_run_parameters
+
+        with (
+            patch(
+                "main_video_editor.correct_srt_errors.correct_srt_errors_openrouter_model",
+                "deepseek/deepseek-v4-pro",
+            ),
+            patch(
+                "main_video_editor.correct_srt_errors.correct_srt_errors_openrouter_inference_provider",
+                "baidu/fp8",
+            ),
+            patch(
+                "main_video_editor.correct_srt_errors.OPENROUTER_CORRECTION_BATCH_SIZE",
+                100,
+            ),
+            patch(
+                "main_video_editor.correct_srt_errors.OPENROUTER_CORRECTION_MAX_WORKERS",
+                3,
+            ),
+        ):
+            print_run_parameters(
+                mp4_path="video.mp4",
+                no_cut_mode=True,
+                provider="openrouter",
+                outline_mode="chapters",
+                webinar_topic="Agents",
+                use_audio_for_analysis=False,
+                whisper_model="turbo",
+                language="ru",
+                keep_fillers=False,
+                translate_to="en",
+            )
+
+        mock_print.assert_any_call(
+            "Step 2 correction model: deepseek/deepseek-v4-pro"
+        )
+        mock_print.assert_any_call("Step 2 inference provider: baidu/fp8")
+        mock_print.assert_any_call(
+            "Step 2 batch configuration: 100 items, 3 workers"
+        )
 
     def test_convert_gemini_response_to_cut_format(self):
         from main_video_editor import convert_gemini_response_to_cut_format

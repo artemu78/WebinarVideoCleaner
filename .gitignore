@@ -44,4 +44,4 @@ gemini_key.txt
 *_ranges.json
 *_chapters.txt
 .gemini
-
+run_logs/

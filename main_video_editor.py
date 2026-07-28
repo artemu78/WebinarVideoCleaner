@@ -12,9 +12,11 @@ Main script to orchestrate MP4 video editing workflow:
 """
 
 import os
+import contextlib
 import json
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -55,6 +57,115 @@ def print_step_summary(step_number, start_time, start_cost):
     step_cost = common_utils.get_total_gemini_cost() - start_cost
     print(f"Step {step_number} duration: {format_duration(duration)}")
     print(f"Step {step_number} AI cost: ${step_cost:.6f}")
+
+
+class _TeeTextStream:
+    """Write console output to the terminal and a run log."""
+
+    def __init__(self, terminal_stream, log_stream):
+        self.terminal_stream = terminal_stream
+        self.log_stream = log_stream
+        self._lock = threading.Lock()
+
+    def write(self, text):
+        with self._lock:
+            self.terminal_stream.write(text)
+            self.log_stream.write(text)
+        return len(text)
+
+    def flush(self):
+        with self._lock:
+            self.terminal_stream.flush()
+            self.log_stream.flush()
+
+    def isatty(self):
+        return self.terminal_stream.isatty()
+
+    @property
+    def encoding(self):
+        return self.terminal_stream.encoding
+
+
+def run_with_log(log_dir=None):
+    """Run the interactive workflow while preserving its complete console transcript."""
+    log_dir = log_dir or os.path.join(os.path.dirname(__file__), "run_logs")
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    log_path = os.path.abspath(
+        os.path.join(log_dir, f"video_cleaner_run_{timestamp}.txt")
+    )
+
+    with open(log_path, "w", encoding="utf-8", buffering=1) as log_file:
+        stdout_tee = _TeeTextStream(sys.stdout, log_file)
+        stderr_tee = _TeeTextStream(sys.stderr, log_file)
+        with contextlib.redirect_stdout(stdout_tee), contextlib.redirect_stderr(
+            stderr_tee
+        ):
+            print(f"Run log: {log_path}")
+            try:
+                main()
+            finally:
+                print(f"\nRun log saved to: {log_path}")
+
+    return log_path
+
+
+def print_run_parameters(
+    mp4_path,
+    no_cut_mode,
+    provider,
+    outline_mode,
+    webinar_topic,
+    use_audio_for_analysis,
+    whisper_model,
+    language,
+    keep_fillers,
+    translate_to,
+):
+    """Print effective, non-secret workflow parameters for the run log."""
+    correction_model = (
+        correct_srt_errors.correct_srt_errors_openrouter_model
+        if provider == "openrouter"
+        else correct_srt_errors.correct_srt_errors_model
+    )
+    correction_inference_provider = (
+        correct_srt_errors.correct_srt_errors_openrouter_inference_provider
+        if provider == "openrouter"
+        else None
+    )
+
+    print("\n" + "=" * 60)
+    print("RUN PARAMETERS")
+    print("=" * 60)
+    print(f"Input video: {os.path.abspath(mp4_path)}")
+    print(
+        "Mode: "
+        + (
+            "Transcription & Chapters Only (No Cut)"
+            if no_cut_mode
+            else "Full Video Cleaner"
+        )
+    )
+    print(f"AI provider: {provider}")
+    print(f"Outline output: {outline_mode}")
+    print(f"Webinar topic: {webinar_topic or 'Not provided'}")
+    print(f"Use audio for analysis: {use_audio_for_analysis}")
+    print(f"Whisper model: {whisper_model}")
+    print(f"Requested language: {language or 'Auto-detect'}")
+    print(f"Keep filler words: {keep_fillers}")
+    print(f"Translate to: {translate_to or 'No translation'}")
+    print(f"Step 2 correction model: {correction_model}")
+    if provider == "openrouter":
+        print(
+            "Step 2 inference provider: "
+            f"{correction_inference_provider or 'OpenRouter automatic routing'}"
+        )
+        print(
+            "Step 2 batch configuration: "
+            f"{correct_srt_errors.OPENROUTER_CORRECTION_BATCH_SIZE} items, "
+            f"{correct_srt_errors.OPENROUTER_CORRECTION_MAX_WORKERS} workers"
+        )
+    print("=" * 60)
 
 
 def extract_json_from_text(text):
@@ -258,6 +369,8 @@ def main():
         mp4_path = mp4_path[1:-1]
     elif mp4_path.startswith("'") and mp4_path.endswith("'"):
         mp4_path = mp4_path[1:-1]
+
+    print(f"Input video parameter: {mp4_path or 'Not provided'}")
     
     if not mp4_path:
         print("Error: No file path provided.")
@@ -369,6 +482,19 @@ def main():
         print(f"No translation")
     else:
         print(f"Translation language set to: {translate_to}")
+
+    print_run_parameters(
+        mp4_path=mp4_path,
+        no_cut_mode=no_cut_mode,
+        provider=provider,
+        outline_mode=outline_mode,
+        webinar_topic=webinar_topic,
+        use_audio_for_analysis=use_audio_for_analysis,
+        whisper_model=whisper_model,
+        language=language,
+        keep_fillers=keep_fillers,
+        translate_to=translate_to,
+    )
 
     # Initialize variables that might be skipped
     gemini_response_path = "Skipped"
@@ -730,4 +856,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_with_log()

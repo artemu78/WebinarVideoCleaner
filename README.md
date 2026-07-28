@@ -12,6 +12,7 @@ This project provides an automated workflow to clean and enhance webinar recordi
 - **Chapter Generation**: Generates structured chapters with titles and summaries for the final video.
 - **Teacher Delivery Metrics**: Analyzes teacher delivery including pace, student-to-teacher talk ratio, jargon density, and engagement.
 - **Cost & Time Tracking**: Monitors script execution time and estimates Gemini API costs.
+- **Per-Run Logs**: Saves selected parameters, console output, errors, timings, costs, and result paths to a separate timestamped text file.
 
 ## Prerequisites
 
@@ -65,6 +66,9 @@ The main entry point for the application is `main_video_editor.py`.
     - Chapters File
     - **Delivery Metrics Report**
     - Usage Stats
+
+    Every invocation also creates `run_logs/video_cleaner_run_<timestamp>.txt`.
+    Run logs are local artifacts and are excluded from Git.
 
 ## Workflow Details
 
