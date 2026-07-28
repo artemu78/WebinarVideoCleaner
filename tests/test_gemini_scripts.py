@@ -2,6 +2,8 @@ import unittest
 import sys
 import os
 import importlib
+import threading
+import time
 import urllib.error
 from unittest.mock import patch, MagicMock, mock_open
 
@@ -40,7 +42,11 @@ class TestAIScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "gemini_response" not in p
         
         mock_client = MagicMock()
-        with patch("common_utils.genai.Client", return_value=mock_client):
+        mock_genai = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        with patch("common_utils.genai", mock_genai), patch(
+            "common_utils.types", MagicMock()
+        ):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -84,7 +90,11 @@ class TestAIScripts(unittest.TestCase):
         mock_exists.side_effect = lambda p: "_corrected_by_gemini" not in p
         
         mock_client = MagicMock()
-        with patch("common_utils.genai.Client", return_value=mock_client):
+        mock_genai = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        with patch("common_utils.genai", mock_genai), patch(
+            "common_utils.types", MagicMock()
+        ):
             mock_file = MagicMock()
             mock_file.state.name = "ACTIVE"
             mock_safe_upload.return_value = mock_file
@@ -118,6 +128,93 @@ class TestAIScripts(unittest.TestCase):
         self.assertIn("_corrected_by_openrouter.srt", output)
         mock_gen.assert_called()
         self.assertEqual(mock_gen.call_args.kwargs["inference_provider"], "baidu/fp8")
+        prompt = mock_gen.call_args.kwargs["prompt"]
+        self.assertIn("Return ONLY items whose text requires correction.", prompt)
+        self.assertIn('{"id":"1","text":"Original text"}', prompt)
+        self.assertNotIn('{\n  "id"', prompt)
+
+    @patch("common_utils.generate_content", return_value="[]")
+    @patch("os.path.exists")
+    def test_correct_transcription_accepts_no_changed_items(self, mock_exists, mock_gen):
+        import correct_srt_errors
+        importlib.reload(correct_srt_errors)
+        mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+        mock_srt_content = "1\n00:01:00,000 --> 00:01:02,000\nAlready correct\n\n"
+
+        with (
+            patch("builtins.open", mock_open(read_data=mock_srt_content)),
+            patch.object(correct_srt_errors, "write_srt") as mock_write,
+        ):
+            output = correct_srt_errors.process_srt_correction(
+                "test.srt", language="en", provider="openrouter"
+            )
+
+        self.assertIn("_corrected_by_openrouter.srt", output)
+        mock_gen.assert_called_once()
+        mock_write.assert_called_once()
+
+    @patch("os.path.exists")
+    def test_correct_transcription_limits_parallel_openrouter_batches(self, mock_exists):
+        import correct_srt_errors
+        with patch.dict(
+            os.environ, {"OPENROUTER_CORRECTION_MAX_WORKERS": "3"}, clear=False
+        ):
+            importlib.reload(correct_srt_errors)
+
+        mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+        mock_srt_content = "\n\n".join(
+            f"{index}\n00:01:00,000 --> 00:01:02,000\nOriginal text {index}"
+            for index in range(1, 302)
+        )
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def generate(*args, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            with lock:
+                active -= 1
+            return "[]"
+
+        with (
+            patch("builtins.open", mock_open(read_data=mock_srt_content)),
+            patch.object(correct_srt_errors, "generate_content", side_effect=generate),
+            patch.object(correct_srt_errors, "write_srt"),
+        ):
+            output = correct_srt_errors.process_srt_correction(
+                "test.srt", language="en", provider="openrouter"
+            )
+
+        self.assertIsNotNone(output)
+        self.assertGreaterEqual(max_active, 2)
+        self.assertLessEqual(max_active, 3)
+
+    @patch("builtins.print")
+    def test_openrouter_usage_summary_reports_effective_prices(self, mock_print):
+        import correct_srt_errors
+
+        correct_srt_errors._print_openrouter_usage_summary(
+            [
+                {
+                    "metadata": {
+                        "usage": {
+                            "prompt_tokens": 800,
+                            "completion_tokens": 200,
+                            "cost": 0.001,
+                            "cost_details": {"upstream_inference_cost": 0.002},
+                            "prompt_tokens_details": {"cached_tokens": 300},
+                        }
+                    }
+                }
+            ]
+        )
+
+        mock_print.assert_any_call("  Observed blended price: $1.0000 per 1M tokens")
+        mock_print.assert_any_call("  Upstream blended price: $2.0000 per 1M tokens")
 
     @patch("common_utils.generate_content", return_value='[{"id": "1", "text": "Fixed"}]')
     @patch("os.path.exists")
@@ -163,6 +260,38 @@ class TestAIScripts(unittest.TestCase):
 
         self.assertIsNone(output)
         mock_gen.assert_called_once()
+        mock_write.assert_not_called()
+
+    @patch("os.path.exists")
+    def test_correct_transcription_does_not_write_partial_file_after_forbidden_batch(
+        self, mock_exists
+    ):
+        import correct_srt_errors
+        importlib.reload(correct_srt_errors)
+        mock_exists.side_effect = lambda p: "_corrected_by_openrouter" not in p
+        mock_srt_content = "\n\n".join(
+            f"{index}\n00:01:00,000 --> 00:01:02,000\nOriginal text {index}"
+            for index in range(1, 102)
+        )
+        responses = [
+            '[{"id":"1","text":"Fixed"}]',
+            urllib.error.HTTPError(
+                "https://openrouter.ai", 403, "Forbidden", None, None
+            ),
+        ]
+
+        with (
+            patch("builtins.open", mock_open(read_data=mock_srt_content)),
+            patch.object(
+                correct_srt_errors, "generate_content", side_effect=responses
+            ),
+            patch.object(correct_srt_errors, "write_srt") as mock_write,
+        ):
+            output = correct_srt_errors.process_srt_correction(
+                "test.srt", language="ru", provider="openrouter"
+            )
+
+        self.assertIsNone(output)
         mock_write.assert_not_called()
 
     @patch("os.path.exists")

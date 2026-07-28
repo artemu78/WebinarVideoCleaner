@@ -17,6 +17,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 
 # Import the modules
 try:
@@ -35,11 +36,24 @@ except ImportError as e:
     sys.exit(1)
 
 
+def format_duration(duration_seconds):
+    """Format elapsed seconds as HH:MM:SS.cc."""
+    total_centiseconds = int(
+        (Decimal(str(duration_seconds)) * 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    hours, remainder = divmod(total_centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    seconds, centiseconds = divmod(remainder, 100)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+
+
 def print_step_summary(step_number, start_time, start_cost):
     """Print elapsed time and the AI cost accumulated during one workflow step."""
     duration = time.time() - start_time
     step_cost = common_utils.get_total_gemini_cost() - start_cost
-    print(f"Step {step_number} duration: {duration:.2f} seconds")
+    print(f"Step {step_number} duration: {format_duration(duration)}")
     print(f"Step {step_number} AI cost: ${step_cost:.6f}")
 
 

@@ -4,6 +4,8 @@ import time
 import json
 import re
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
 from common_utils import (
     get_api_key,
@@ -26,6 +28,9 @@ correct_srt_errors_openrouter_inference_provider = os.environ.get(
 # Large JSON-only responses from free OpenRouter routes are more likely to be
 # truncated. Keep batches small enough that their corrected JSON fits reliably.
 OPENROUTER_CORRECTION_BATCH_SIZE = int(os.environ.get("OPENROUTER_CORRECTION_BATCH_SIZE", "100"))
+OPENROUTER_CORRECTION_MAX_WORKERS = int(
+    os.environ.get("OPENROUTER_CORRECTION_MAX_WORKERS", "3")
+)
 
 
 def _parse_correction_json_array(text):
@@ -92,8 +97,9 @@ def _build_correction_prompt(language, webinar_topic, keep_fillers, file_attache
         1. Read the parsed JSON list.
         2. {filler_instruction}
         3. DO NOT change the 'id'.
-        4. DO NOT change the number of items.
-        5. Return the result as a valid JSON list ONLY (no markdown, no commentary).
+        4. Return ONLY items whose text requires correction.
+        5. Omit unchanged items. Missing ids will retain their original text.
+        6. Return a valid JSON list ONLY (no markdown, no commentary).
 
         Output Format:
         [
@@ -101,6 +107,103 @@ def _build_correction_prompt(language, webinar_topic, keep_fillers, file_attache
           {{"id": "2", "text": "More corrected text"}}
         ]
         """
+
+
+def _format_duration(duration_seconds):
+    total_centiseconds = int(
+        (Decimal(str(duration_seconds)) * 100).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    hours, remainder = divmod(total_centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    seconds, centiseconds = divmod(remainder, 100)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+
+
+def _usage_summary(metadata):
+    usage = metadata.get("usage") if isinstance(metadata, dict) else None
+    if not isinstance(usage, dict):
+        return None
+
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    cost = usage.get("cost")
+    if not isinstance(prompt_tokens, int) or not isinstance(completion_tokens, int):
+        return None
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        cost = None
+    cost_details = usage.get("cost_details")
+    upstream_cost = (
+        cost_details.get("upstream_inference_cost")
+        if isinstance(cost_details, dict)
+        else None
+    )
+    if isinstance(upstream_cost, bool) or not isinstance(upstream_cost, (int, float)):
+        upstream_cost = None
+
+    prompt_details = usage.get("prompt_tokens_details")
+    cached_tokens = (
+        prompt_details.get("cached_tokens", 0)
+        if isinstance(prompt_details, dict)
+        else 0
+    )
+    if not isinstance(cached_tokens, int):
+        cached_tokens = 0
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "cached_tokens": cached_tokens,
+        "completion_tokens": completion_tokens,
+        "cost": float(cost) if cost is not None else None,
+        "upstream_cost": float(upstream_cost) if upstream_cost is not None else None,
+    }
+
+
+def _print_openrouter_usage_summary(batch_results):
+    usages = [
+        usage
+        for result in batch_results
+        if (usage := _usage_summary(result.get("metadata"))) is not None
+    ]
+    if not usages:
+        print("OpenRouter usage pricing: unavailable in API responses.")
+        return
+
+    prompt_tokens = sum(item["prompt_tokens"] for item in usages)
+    cached_tokens = sum(item["cached_tokens"] for item in usages)
+    completion_tokens = sum(item["completion_tokens"] for item in usages)
+    costs = [item["cost"] for item in usages]
+
+    print("\nOpenRouter Step 2 usage:")
+    print(
+        f"  Input: {prompt_tokens:,} tokens "
+        f"({cached_tokens:,} cached) | Output: {completion_tokens:,} tokens"
+    )
+    if any(cost is None for cost in costs):
+        print("  Charged cost/effective price: unavailable in one or more responses.")
+        return
+
+    total_cost = sum(costs)
+    billable_tokens = prompt_tokens + completion_tokens
+    print(f"  Charged cost: ${total_cost:.6f}")
+    if billable_tokens:
+        blended_price = total_cost * 1_000_000 / billable_tokens
+        print(f"  Observed blended price: ${blended_price:.4f} per 1M tokens")
+    upstream_costs = [item["upstream_cost"] for item in usages]
+    if all(cost is not None for cost in upstream_costs):
+        total_upstream_cost = sum(upstream_costs)
+        print(f"  Reported upstream inference cost: ${total_upstream_cost:.6f}")
+        if billable_tokens:
+            upstream_blended_price = total_upstream_cost * 1_000_000 / billable_tokens
+            print(
+                f"  Upstream blended price: ${upstream_blended_price:.4f} "
+                "per 1M tokens"
+            )
+    print(
+        "  Declared and separate input/output/cache rates are not included in "
+        "this response, so they cannot be compared separately."
+    )
 
 
 def process_srt_correction(
@@ -151,49 +254,110 @@ def process_srt_correction(
     batches = [original_blocks[i : i + batch_size] for i in range(0, len(original_blocks), batch_size)]
     print(f"Split into {len(batches)} batches for processing (Provider: {provider}, Batch Size: {batch_size}).")
 
-    corrected_map = {}
-    successful_batches = 0
-    
-    for i, batch in enumerate(batches):
-        print(f"\nProcessing Batch {i+1}/{len(batches)} ({len(batch)} items)...")
+    def process_batch(i, batch):
         input_payload = [{"id": b["index"], "text": b["text"]} for b in batch]
-        batch_json = json.dumps(input_payload, indent=2, ensure_ascii=False)
-        
+        batch_json = json.dumps(
+            input_payload, ensure_ascii=False, separators=(",", ":")
+        )
         prompt = (
             _build_correction_prompt(language, webinar_topic, keep_fillers, file_attached=False).strip()
             + "\n\nInput JSON:\n"
             + batch_json
         )
-        
-        print(f"  Requesting correction from {provider} (model: {model})...")
+        metadata = {}
+        started_at = time.perf_counter()
         try:
-            # Use unified generate_content which handles Gemini/OpenRouter and retries
             raw = generate_content(
-                provider=provider, 
-                model=model, 
+                provider=provider,
+                model=model,
                 prompt=prompt,
                 response_mime_type="application/json" if provider == "gemini" else None,
                 inference_provider=inference_provider,
+                response_metadata=metadata,
             )
-            
             batch_corrected = _parse_correction_json_array(raw)
-            if not batch_corrected:
-                print(f"  ❌ Failed to parse JSON from batch {i+1} response.")
+            if batch_corrected is None:
+                raise ValueError("OpenRouter response was not a valid JSON array")
+            return {
+                "index": i,
+                "corrected": batch_corrected,
+                "metadata": metadata,
+                "duration": time.perf_counter() - started_at,
+                "error": None,
+            }
+        except Exception as error:
+            return {
+                "index": i,
+                "corrected": None,
+                "metadata": metadata,
+                "duration": time.perf_counter() - started_at,
+                "error": error,
+            }
+
+    corrected_map = {}
+    successful_batches = 0
+    batch_results = []
+    max_workers = (
+        max(1, min(OPENROUTER_CORRECTION_MAX_WORKERS, len(batches)))
+        if provider == "openrouter"
+        else 1
+    )
+    print(f"Processing with {max_workers} concurrent request(s).")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {}
+        for i, batch in enumerate(batches):
+            print(f"  Queueing Batch {i+1}/{len(batches)} ({len(batch)} items)...")
+            futures[executor.submit(process_batch, i, batch)] = i
+
+        for future in as_completed(futures):
+            result = future.result()
+            batch_results.append(result)
+            batch_number = result["index"] + 1
+            duration = _format_duration(result["duration"])
+            error = result["error"]
+
+            if error is not None:
+                if isinstance(error, urllib.error.HTTPError):
+                    print(
+                        f"  ❌ Batch {batch_number} rejected with HTTP {error.code} "
+                        f"after {duration}."
+                    )
+                else:
+                    print(f"  ❌ Batch {batch_number} failed after {duration}: {error}")
                 continue
-                
-            for item in batch_corrected:
+
+            for item in result["corrected"]:
                 corrected_map[item["id"]] = item["text"]
             successful_batches += 1
-            print(f"  ✓ Batch {i+1} Success.")
-            
-        except urllib.error.HTTPError as error:
+            metadata = result["metadata"]
+            actual_provider = metadata.get("provider") or inference_provider or "unknown"
+            usage = _usage_summary(metadata)
+            usage_text = ""
+            if usage:
+                usage_text = (
+                    f" | {usage['prompt_tokens']:,} in / "
+                    f"{usage['completion_tokens']:,} out"
+                )
             print(
-                f"  ❌ OpenRouter rejected batch {i+1} with HTTP {error.code}. "
-                "Stopping Step 2; no corrected file will be created."
+                f"  ✓ Batch {batch_number} Success in {duration} "
+                f"(provider: {actual_provider}){usage_text}."
             )
-            return None
-        except Exception as e:
-            print(f"  ❌ Error in batch {i+1}: {e}")
+
+    if provider == "openrouter":
+        _print_openrouter_usage_summary(batch_results)
+
+    rejected_batches = [
+        result
+        for result in batch_results
+        if isinstance(result.get("error"), urllib.error.HTTPError)
+    ]
+    if rejected_batches:
+        print(
+            "❌ OpenRouter rejected one or more batches; Step 2 stopped and "
+            "no corrected file was created."
+        )
+        return None
 
     if successful_batches == 0:
         print("❌ No batches were corrected. Step 2 stopped; no corrected file was created.")

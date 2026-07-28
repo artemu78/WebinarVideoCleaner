@@ -35,6 +35,12 @@ class TestMainVideoEditor(unittest.TestCase):
         self.assertEqual(convert_timestamp_format("00:01:02"), "00:01:02")
         self.assertEqual(convert_timestamp_format("00:01:02,123"), "00:01:02")
 
+    def test_format_duration(self):
+        from main_video_editor import format_duration
+
+        self.assertEqual(format_duration(2451.79), "00:40:51.79")
+        self.assertEqual(format_duration(3661.005), "01:01:01.01")
+
     @patch("builtins.print")
     @patch("main_video_editor.common_utils.get_total_gemini_cost", return_value=0.012345)
     @patch("main_video_editor.time.time", return_value=12.5)
@@ -45,7 +51,7 @@ class TestMainVideoEditor(unittest.TestCase):
 
         print_step_summary(2, start_time=10.0, start_cost=0.002345)
 
-        mock_print.assert_any_call("Step 2 duration: 2.50 seconds")
+        mock_print.assert_any_call("Step 2 duration: 00:00:02.50")
         mock_print.assert_any_call("Step 2 AI cost: $0.010000")
 
     def test_convert_gemini_response_to_cut_format(self):

@@ -165,25 +165,35 @@ class TestCommonUtils(unittest.TestCase):
     def test_generate_content_openrouter(self, mock_urlopen):
         mock_response = MagicMock()
         mock_response.read.return_value = (
-            b'{"choices":[{"message":{"content":"hello from openrouter"}}],'
+            b'{"model":"openai/gpt-4o-mini","choices":[{"message":{"content":"hello from openrouter"}}],'
+            b'"openrouter_metadata":{"endpoints":{"available":['
+            b'{"provider":"Baidu","selected":true}]}},'
             b'"usage":{"prompt_tokens":1000,"completion_tokens":500,'
-            b'"total_tokens":1500,"cost":0.012345}}'
+            b'"total_tokens":1500,"cost":0.012345,'
+            b'"prompt_tokens_details":{"cached_tokens":250},'
+            b'"cost_details":{"upstream_inference_cost":0.02}}}'
         )
         mock_urlopen.return_value.__enter__.return_value = mock_response
+        metadata = {}
 
         response_text = common_utils.generate_content(
             provider="openrouter",
             model="openai/gpt-4o-mini",
             prompt="translate me",
+            response_metadata=metadata,
         )
 
         self.assertEqual(response_text, "hello from openrouter")
         self.assertAlmostEqual(get_total_gemini_cost(), 0.012345)
+        self.assertEqual(metadata["model"], "openai/gpt-4o-mini")
+        self.assertEqual(metadata["provider"], "Baidu")
+        self.assertEqual(metadata["usage"]["prompt_tokens_details"]["cached_tokens"], 250)
         self.assertTrue(mock_urlopen.called)
         # Verify that it was called with the right headers
         args, kwargs = mock_urlopen.call_args
         request = args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer or_test_key")
+        self.assertEqual(request.get_header("X-openrouter-metadata"), "enabled")
 
     @patch.dict(os.environ, {"OPENROUTER_API_KEY": "or_test_key"}, clear=True)
     @patch("common_utils.time.sleep")

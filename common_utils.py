@@ -9,6 +9,7 @@ import re
 import shutil
 import tempfile
 import functools
+import threading
 
 # Try to import google.genai for safe_upload typing/config
 try:
@@ -266,6 +267,7 @@ def parse_json_array(text):
 # Cost tracking. The legacy name is kept because existing scripts and tests may
 # still reset or read it directly, but it now accumulates every AI provider.
 _TOTAL_GEMINI_COST = 0.0
+_AI_COST_LOCK = threading.Lock()
 
 def calculate_gemini_cost(response):
     """
@@ -325,7 +327,8 @@ def track_openrouter_cost(response_body):
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost < 0:
         return 0.0
 
-    _TOTAL_GEMINI_COST += float(cost)
+    with _AI_COST_LOCK:
+        _TOTAL_GEMINI_COST += float(cost)
     return float(cost)
 
 
@@ -411,6 +414,7 @@ def generate_content(
     response_mime_type=None,
     temperature=0.1,
     inference_provider=None,
+    response_metadata=None,
 ):
     """
     Generate text content via configured provider.
@@ -422,6 +426,7 @@ def generate_content(
         response_mime_type (str): Optional MIME type for response (Gemini only)
         temperature (float): Sampling temperature
         inference_provider (str): Optional OpenRouter inference provider for this request only.
+        response_metadata (dict): Optional mutable mapping populated with OpenRouter response metadata.
 
     Returns:
         str: model response text
@@ -468,6 +473,7 @@ def generate_content(
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://localhost",
                 "X-Title": "VideoCleaner",
+                "X-OpenRouter-Metadata": "enabled",
             },
             method="POST",
         )
@@ -486,6 +492,32 @@ def generate_content(
             raise RuntimeError(f"OpenRouter API Error: {body['error']}")
 
         track_openrouter_cost(body)
+        if response_metadata is not None:
+            usage = body.get("usage")
+            router_metadata = body.get("openrouter_metadata")
+            selected_provider = None
+            if isinstance(router_metadata, dict):
+                endpoints = router_metadata.get("endpoints")
+                available = endpoints.get("available") if isinstance(endpoints, dict) else None
+                if isinstance(available, list):
+                    selected = next(
+                        (
+                            endpoint
+                            for endpoint in available
+                            if isinstance(endpoint, dict) and endpoint.get("selected")
+                        ),
+                        None,
+                    )
+                    if selected:
+                        selected_provider = selected.get("provider")
+
+            response_metadata.update(
+                {
+                    "model": body.get("model", model),
+                    "provider": selected_provider,
+                    "usage": usage if isinstance(usage, dict) else {},
+                }
+            )
 
         choices = body.get("choices")
         if not isinstance(choices, list) or not choices:
