@@ -9,8 +9,16 @@ permissions:
   contents: read
 
 jobs:
-  prove-gh-access:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm runner works
-        run: echo "GitHub Actions is working"
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run VideoCleaner tests
+        run: bash tests.sh
