@@ -1,0 +1,16 @@
+name: Minimal CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove-gh-access:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm runner works
+        run: echo "GitHub Actions is working"
